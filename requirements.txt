@@ -8,10 +8,15 @@ python-multipart==0.0.6
 pyyaml==6.0.1
 python-dotenv==1.0.0
 
-# Dependencias para reportes (sin matplotlib que da problemas de compilación)
+# Dependencias para reportes (sin matplotlib ni dependencias que requieran compilación C)
 xlsxwriter==3.1.9
 jinja2==3.1.2
 requests==2.31.0
 aiofiles==23.2.0
-plotly==5.17.0
-kaleido==0.2.1
+
+# Para gráficos simples sin matplotlib
+pillow==10.1.0
+
+# Dependencias adicionales para el sistema
+numpy==1.24.4
+pytz==2023.3
