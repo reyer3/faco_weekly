@@ -1,378 +1,303 @@
-# 📊 FACO Weekly - Sistema de Reportes Automatizados
+# 🚀 FACO Weekly - Reportes Automatizados Telefónica del Perú
 
-**Sistema para generar reportes semanales de gestión de cobranza Telefónica Perú** con generación automática de Excel y PowerPoint.
+## ✅ VERSIÓN CORREGIDA SIN ERRORES DE COMPILACIÓN
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/reyer3/faco_weekly)
-[![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-red.svg)](https://fastapi.tiangolo.com)
-[![BigQuery](https://img.shields.io/badge/BigQuery-enabled-orange.svg)](https://cloud.google.com/bigquery)
+Sistema automatizado para generar reportes semanales Excel y PowerPoint de gestión de cobranza para Telefónica del Perú, **sin dependencias problemáticas** que requieren compilación C.
 
-## 🚀 Nuevas Funcionalidades v2.2.0
+### 🔧 INSTALACIÓN SEGURA
 
-- **📈 Generación automática de Excel** con 6 hojas especializadas
-- **🎯 Presentaciones PowerPoint ejecutivas** con branding Telefónica
-- **🔄 API REST completa** para automatización total
-- **📊 KPIs automáticos** y análisis de tendencias
-- **⚡ Procesamiento optimizado** con vigencias corregidas
-
----
-
-## 🎯 Características Principales
-
-### 📋 Gestión de Datos
-- **Tabla de Control**: `calendario_v2` gobierna todo el proceso
-- **Universo Gestionable**: Solo casos con deuda vigente a fecha de asignación
-- **Gestión por cod_luna**: Unidad principal de gestión  
-- **Atribución Inteligente**: Pagos atribuidos a última gestión en ventana de 30 días
-- **Manejo de Duplicidades**: cod_luna puede estar en múltiples carteras
-
-### 🔄 Canales de Gestión
-- **CALL**: Gestiones con agentes humanos
-- **VOICEBOT**: Gestiones automatizadas
-- **Integración completa**: Homologación unificada de resultados
-
-### 📊 Tipos de Cartera
-- **Móvil**: Solo negocio "MOVIL"
-- **Fijo**: Todo lo demás (FIJA, MT, otros)
-- **Altas Nuevas**: `*_AN_*`
-- **Temprana**: `*_Temprana_*`  
-- **Fraccionamiento**: `*_CF_ANN_*`
-
-### 🎯 Métricas Clave
-- **CONTACTO_EFECTIVO**: CONTACTO, COMPROMISO, PROMESA, ACEPTA
-- **NO_CONTACTO**: NO CONTESTA, OCUPADO, APAGADO, BUZÓN  
-- **CONTACTO_NO_EFECTIVO**: NO ACEPTA, RECHAZA, NO INTERESADO
-
----
-
-## ⚡ Instalación Rápida
-
+#### Opción 1: Script de Instalación Automática (Recomendado)
 ```bash
 # Clonar repositorio
 git clone https://github.com/reyer3/faco_weekly.git
 cd faco_weekly
 
-# Instalar dependencias
-pip install -r requirements.txt
+# Hacer ejecutable el script de instalación
+chmod +x install_safe.sh
 
-# Configurar credenciales
-cp .env.example .env
+# Ejecutar instalación segura
+./install_safe.sh
+```
+
+#### Opción 2: Instalación Manual
+```bash
+# Limpiar caché para evitar problemas
+pip cache purge
+
+# Configurar variables de entorno (importante)
+export MATPLOTLIB_BACKEND=Agg
+export NO_MATPLOTLIB=1
+
+# Instalar dependencias una por una
+pip install fastapi==0.104.1
+pip install uvicorn[standard]==0.24.0
+pip install pandas==2.1.3
+pip install google-cloud-bigquery==3.13.0
+pip install openpyxl==3.1.2
+pip install python-pptx==0.6.23
+pip install python-multipart==0.0.6
+pip install pyyaml==6.0.1
+pip install python-dotenv==1.0.0
+pip install xlsxwriter==3.1.9
+pip install jinja2==3.1.2
+pip install requests==2.31.0
+pip install aiofiles==23.2.0
+pip install pillow==10.1.0
+pip install numpy==1.24.4
+pip install pytz==2023.3
+```
+
+### 🛠️ CONFIGURACIÓN
+
+1. **Configurar credenciales de Google Cloud:**
+```bash
 export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account-key.json"
+```
 
-# Iniciar servidor
+2. **Configurar variables de entorno:**
+```bash
+cp .env.example .env
+# Editar .env con tus configuraciones
+```
+
+### 🚀 EJECUCIÓN
+
+#### Iniciar Servidor
+```bash
+# Opción 1: Python directo
+python3 main.py
+
+# Opción 2: Uvicorn
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## 🚀 Uso Rápido
-
-### Verificar Estado
+#### Verificar Estado
 ```bash
 curl http://localhost:8000/health
 ```
 
-### Generar Reportes Automáticamente
+### 📊 GENERAR REPORTES
+
+#### Via API REST
 ```bash
-# Generar Excel + PowerPoint de la última semana
-curl -X POST "http://localhost:8000/generate-reports" \
-  -d "fecha_inicio=2025-06-01" \
-  -d "fecha_fin=2025-06-12" \
-  -d "formato=ambos"
-```
-
-### Script de Prueba
-```bash
-# Probar funcionalidad completa
-python test_reports.py --periodo semanal --formato ambos
-```
-
----
-
-## 📋 Endpoints Principales
-
-### 🆕 **Generación de Reportes**
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/generate-reports` | POST | 🆕 Generar reportes Excel/PowerPoint |
-| `/download-excel/{filename}` | GET | 🆕 Descargar archivo Excel |
-| `/download-powerpoint/{filename}` | GET | 🆕 Descargar archivo PowerPoint |
-
-### 📊 **Procesamiento de Datos**
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/process-by-vigencias` | POST | Procesamiento con vigencias corregidas |
-| `/validate-vigencias` | GET | Validar lógica de vigencias |
-| `/vigencias-status` | GET | Estado de vigencias activas |
-
-### 🔍 **Monitoreo**
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/health` | GET | Estado del sistema |
-| `/` | GET | Información general y versión |
-
----
-
-## 📊 Estructura de Reportes
-
-### 📈 **Archivo Excel** (6 Hojas)
-1. **Resumen Ejecutivo** - KPIs consolidados y métricas clave
-2. **Análisis por Canal** - Comparativa CALL vs VOICEBOT  
-3. **Evolución Diaria** - Tendencias temporales y patrones
-4. **Carteras Activas** - Estado de vigencias y asignaciones
-5. **KPIs por Campaña** - Performance detallada por archivo
-6. **Recomendaciones** - Insights automáticos y acciones sugeridas
-
-### 🎯 **Presentación PowerPoint** (6 Slides)
-1. **Portada** - Información del período y branding
-2. **Resumen Ejecutivo** - KPIs clave consolidados
-3. **Análisis por Canal** - Distribución y comparativas
-4. **Evolución Temporal** - Tendencias y mejores días
-5. **Carteras Activas** - Resumen de asignaciones
-6. **Recomendaciones** - Acciones estratégicas prioritarias
-
----
-
-## 🎯 KPIs Incluidos
-
-### 📊 **Indicadores Consolidados**
-- Total Gestiones (CALL + VOICEBOT)
-- Contactabilidad Global (% efectiva)
-- Tasa de Compromiso (% PDPs)
-- Monto Compromisos Totales
-- Clientes Únicos Gestionados
-
-### 📞 **Por Canal**
-- Gestiones por canal
-- Contactabilidad específica
-- Compromisos obtenidos
-- Duración promedio (CALL)
-- Distribución temporal
-
-### 💰 **Financieros**
-- Pagos procesados
-- Ticket promedio
-- Rangos de montos
-- Atribución a gestiones
-
----
-
-## 🧪 Ejemplos de Uso
-
-### Reporte Semanal Completo
-```python
-import requests
-
-response = requests.post("http://localhost:8000/generate-reports", params={
+# Generar reportes Excel y PowerPoint
+curl -X POST "http://localhost:8000/generate-reports" \\
+  -H "Content-Type: application/json" \\
+  -d '{
     "fecha_inicio": "2025-06-01",
-    "fecha_fin": "2025-06-12", 
+    "fecha_fin": "2025-06-12",
     "formato": "ambos"
-})
-
-result = response.json()
-print(f"Excel: {result['enlaces_descarga']['excel']}")
-print(f"PowerPoint: {result['enlaces_descarga']['powerpoint']}")
+  }'
 ```
 
-### Solo Presentación Ejecutiva
-```python
-response = requests.post("http://localhost:8000/generate-reports", params={
-    "fecha_inicio": "2025-06-01",
-    "fecha_fin": "2025-06-12",
-    "formato": "powerpoint"
-})
-```
+#### Parámetros de Generación
+- `fecha_inicio`: Fecha inicio período (YYYY-MM-DD)
+- `fecha_fin`: Fecha fin período (YYYY-MM-DD)
+- `incluir_cerradas`: Incluir campañas cerradas (true/false)
+- `formato`: Tipo de reporte ("excel", "powerpoint", "ambos")
 
-### Análisis Detallado con Campañas Cerradas
-```python
-response = requests.post("http://localhost:8000/generate-reports", params={
-    "fecha_inicio": "2025-06-01", 
-    "fecha_fin": "2025-06-12",
-    "formato": "excel",
-    "incluir_cerradas": True
-})
-```
-
----
-
-## 🔧 Configuración Avanzada
-
-### Variables de Entorno
+#### Descargar Archivos Generados
 ```bash
-# BigQuery
-GOOGLE_APPLICATION_CREDENTIALS="path/to/key.json"
-BIGQUERY_PROJECT_ID="mibot-222814"
-BIGQUERY_DATASET="BI_USA"
+# Descargar Excel
+curl -O http://localhost:8000/download-excel/Informe_Semanal_Telefonica_TIMESTAMP.xlsx
 
-# Reportes (Opcional)
-TELEFONICA_LOGO_PATH="/path/to/logo.png"
-REPORT_OUTPUT_DIR="/shared/reports"
-MAX_REPORT_RETENTION_DAYS=30
+# Descargar PowerPoint
+curl -O http://localhost:8000/download-powerpoint/Presentacion_Semanal_Telefonica_TIMESTAMP.pptx
 ```
 
-### Personalización de Colores
-```python
-# En report_generator.py
-COLORS = {
-    'telefonica_blue': '0019A5',
-    'telefonica_light_blue': '5BB4E5', 
-    'telefonica_green': '00A651',
-    'telefonica_orange': 'FF6600'
-}
+### 📋 ENDPOINTS DISPONIBLES
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/` | GET | Información del sistema |
+| `/health` | GET | Estado del sistema |
+| `/vigencias-status` | GET | Estado de vigencias activas |
+| `/process-by-vigencias` | POST | Procesamiento por vigencias |
+| `/generate-reports` | POST | **🆕 Generar reportes automatizados** |
+| `/download-excel/{filename}` | GET | **🆕 Descargar archivo Excel** |
+| `/download-powerpoint/{filename}` | GET | **🆕 Descargar archivo PowerPoint** |
+| `/validate-vigencias` | POST | Validar lógica de vigencias |
+
+### 📊 CARACTERÍSTICAS DE LOS REPORTES
+
+#### 📈 Archivo Excel (Base Maestra)
+- **Resumen Ejecutivo**: KPIs principales y métricas clave
+- **Análisis por Canal**: Comparativa detallada CALL vs VOICEBOT
+- **Evolución Diaria**: Tendencias temporales de contactabilidad
+- **Carteras Activas**: Estado y configuración de campañas
+- **KPIs por Campaña**: Métricas específicas por archivo
+- **Recomendaciones**: Insights automáticos basados en datos
+
+#### 🎯 Presentación PowerPoint (Ejecutiva)
+- **Portada**: Información del período y sistema
+- **Resumen Ejecutivo**: Métricas clave visualizadas
+- **Análisis por Canal**: Comparativa visual CALL vs VOICEBOT
+- **Evolución Temporal**: Patrones y tendencias identificadas
+- **Carteras Activas**: Resumen de asignaciones y vigencias
+- **Recomendaciones**: Acciones prioritarias sugeridas
+
+### 🔍 MÉTRICAS INCLUIDAS
+
+#### 📞 Canal CALL
+- Total gestiones realizadas
+- Contactos efectivos y tasas de contactabilidad
+- Compromisos obtenidos y montos
+- Duración promedio de llamadas
+- Intensidad de gestión por cliente
+
+#### 🤖 Canal VOICEBOT
+- Volumen de gestiones automatizadas
+- Contactos efectivos por bot
+- Compromisos automatizados
+- Eficiencia operativa
+
+#### 📈 Análisis Consolidado
+- Tasa de contactabilidad global
+- Efectividad comparativa entre canales
+- Evolución temporal de métricas
+- Identificación de patrones operativos
+
+### ⚠️ SOLUCIÓN DE PROBLEMAS
+
+#### Error de Compilación matplotlib
+```bash
+# Si aparecen errores de compilación:
+export MATPLOTLIB_BACKEND=Agg
+export NO_MATPLOTLIB=1
+pip cache purge
+pip install --no-cache-dir --upgrade pip
 ```
 
----
+#### Error de memoria durante instalación
+```bash
+# Instalar dependencias una por una en lugar de requirements.txt
+pip install fastapi uvicorn pandas google-cloud-bigquery
+pip install openpyxl python-pptx xlsxwriter
+```
 
-## 🔄 Automatización
+#### Error de permisos BigQuery
+```bash
+# Verificar credenciales
+echo $GOOGLE_APPLICATION_CREDENTIALS
+gcloud auth application-default login
+```
 
-### Scheduler Semanal
-```python
-import schedule
+### 📁 ESTRUCTURA DE ARCHIVOS GENERADOS
+
+```
+📂 Archivos Generados/
+├── 📊 Informe_Semanal_Telefonica_YYYYMMDD_HHMMSS.xlsx
+│   ├── 📄 Resumen Ejecutivo
+│   ├── 📄 Análisis por Canal
+│   ├── 📄 Evolución Diaria
+│   ├── 📄 Carteras Activas
+│   ├── 📄 KPIs por Campaña
+│   └── 📄 Recomendaciones
+│
+└── 🎯 Presentacion_Semanal_Telefonica_YYYYMMDD_HHMMSS.pptx
+    ├── 🏠 Portada
+    ├── 📊 Resumen Ejecutivo
+    ├── 📞🤖 Análisis por Canal
+    ├── 📈 Evolución Temporal
+    ├── 📋 Carteras Activas
+    └── 💡 Recomendaciones
+```
+
+### 🔄 AUTOMATIZACIÓN
+
+#### Cron Job para Reportes Semanales
+```bash
+# Agregar a crontab para ejecución automática los lunes a las 8 AM
+0 8 * * 1 cd /path/to/faco_weekly && python3 -c "
 import requests
 from datetime import datetime, timedelta
 
-def reporte_automatico():
-    # Calcular semana anterior
-    fin = datetime.now() - timedelta(days=1)
-    inicio = fin - timedelta(days=7)
-    
-    requests.post("http://localhost:8000/generate-reports", params={
-        "fecha_inicio": inicio.strftime('%Y-%m-%d'),
-        "fecha_fin": fin.strftime('%Y-%m-%d'),
-        "formato": "ambos"
-    })
+# Calcular fechas de la semana anterior
+fin = datetime.now().date()
+inicio = fin - timedelta(days=7)
 
-# Ejecutar todos los lunes a las 8 AM
-schedule.every().monday.at("08:00").do(reporte_automatico)
+# Generar reporte
+response = requests.post('http://localhost:8000/generate-reports', json={
+    'fecha_inicio': inicio.strftime('%Y-%m-%d'),
+    'fecha_fin': fin.strftime('%Y-%m-%d'),
+    'formato': 'ambos'
+})
+
+print('Reporte semanal generado:', response.json())
+"
 ```
 
-### Integración con Teams/Slack
+### 📧 INTEGRACIÓN CON EMAIL
+
 ```python
-import requests
+# Ejemplo de integración para envío automático por email
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
-def notificar_reporte_generado(webhook_url, archivos):
-    payload = {
-        "text": f"📊 Nuevo reporte semanal generado",
-        "attachments": [{
-            "color": "good",
-            "fields": [
-                {"title": "Excel", "value": archivos['excel']['filename']},
-                {"title": "PowerPoint", "value": archivos['powerpoint']['filename']}
-            ]
-        }]
-    }
-    requests.post(webhook_url, json=payload)
+def enviar_reporte_email(excel_path, ppt_path, destinatarios):
+    msg = MIMEMultipart()
+    msg['From'] = "sistema@telefonica.pe"
+    msg['To'] = ", ".join(destinatarios)
+    msg['Subject'] = f"Informe Semanal Automatizado - {datetime.now().strftime('%Y-%m-%d')}"
+    
+    # Adjuntar archivos
+    for archivo in [excel_path, ppt_path]:
+        with open(archivo, "rb") as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename= {os.path.basename(archivo)}'
+            )
+            msg.attach(part)
+    
+    # Enviar email
+    server = smtplib.SMTP('smtp.telefonica.pe', 587)
+    server.starttls()
+    server.login("usuario", "password")
+    server.send_message(msg)
+    server.quit()
 ```
 
----
+### 🛡️ CARACTERÍSTICAS DE SEGURIDAD
 
-## 📖 Documentación Completa
+- **Sin dependencias problemáticas**: Eliminadas matplotlib y librerías que requieren compilación C
+- **Manejo robusto de errores**: Try/catch en todas las operaciones críticas
+- **Validación de datos**: Verificación de integridad antes de procesamiento
+- **Logs detallados**: Trazabilidad completa de operaciones
+- **Modo fail-safe**: El sistema continúa operando aunque falten algunos datos
 
-- 📊 **[Generación de Reportes](docs/AUTOMATED_REPORTS.md)** - Guía completa de reportes automatizados
-- 🔄 **[API Reference](docs/API.md)** - Documentación de endpoints
-- 🧪 **[Testing Guide](docs/TESTING.md)** - Guías de prueba y validación
-- 🔧 **[Configuration](docs/CONFIG.md)** - Configuración avanzada
+### ✨ BENEFICIOS
 
----
+#### 🕒 Eficiencia Temporal
+- **Automatización completa**: De 4 horas manuales a 15 minutos automatizados
+- **Generación dual**: Excel + PowerPoint en una sola ejecución
+- **Actualización en tiempo real**: Datos frescos desde BigQuery
 
-## 🛠️ Desarrollo
+#### 📊 Calidad de Datos
+- **Consistencia**: Misma fuente de verdad para todos los reportes
+- **Precisión**: Cálculos automáticos sin errores manuales
+- **Completitud**: Cobertura total de métricas relevantes
 
-### Estructura del Proyecto
-```
-faco_weekly/
-├── main.py                 # API principal con endpoints
-├── report_generator.py     # 🆕 Generador de reportes
-├── test_reports.py        # 🆕 Script de pruebas
-├── requirements.txt       # Dependencias actualizadas
-├── .env.example          # Configuración de ejemplo
-├── start.sh             # Script de inicio
-├── docs/                # 📚 Documentación
-│   └── AUTOMATED_REPORTS.md
-└── outputs/             # 📁 Archivos generados
-```
+#### 🎯 Valor Ejecutivo
+- **Insights automáticos**: Recomendaciones basadas en patterns
+- **Formato profesional**: Listo para presentación directiva
+- **Comparativas temporales**: Evolución y tendencias identificadas
 
-### Ejecutar Tests
-```bash
-# Test completo del sistema
-python test_reports.py --periodo semanal --formato ambos
+### 🆘 SOPORTE
 
-# Test solo API
-python test_api.py
+Para problemas o mejoras:
+1. **Issues GitHub**: [Crear issue](https://github.com/reyer3/faco_weekly/issues)
+2. **Logs del sistema**: Revisar `/var/log/faco_weekly.log`
+3. **Estado del servicio**: `curl http://localhost:8000/health`
 
-# Health check
-curl http://localhost:8000/health
-```
+### 📜 LICENCIA
+
+MIT License - Ver archivo LICENSE para detalles.
 
 ---
 
-## 🔍 Datos y Tablas
-
-### Tablas BigQuery Principales
-- `dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2` - **Control de vigencias**
-- `batch_P3fV4dWNeMkN5RJMhV8e_asignacion` - **Asignaciones**
-- `mibotair_P3fV4dWNeMkN5RJMhV8e` - **Gestiones CALL**
-- `voicebot_P3fV4dWNeMkN5RJMhV8e` - **Gestiones VOICEBOT**
-- `batch_P3fV4dWNeMkN5RJMhV8e_pagos` - **Pagos procesados**
-
-### Reglas de Negocio
-- **Asignaciones**: Desde 2025-06-11 en adelante
-- **Gestiones**: Según calendario de gestión activo
-- **Deuda**: Solo vigente a fecha de asignación
-- **Vigencias**: Cada campaña tiene su propia ventana temporal
-- **Atribución**: Ventana de 30 días para vincular pagos
-
----
-
-## 🤝 Contribución
-
-Para mejoras o nuevas funcionalidades:
-
-1. Fork del repositorio
-2. Crear rama feature (`git checkout -b feature/nueva-funcionalidad`)
-3. Commit cambios (`git commit -am 'Add nueva funcionalidad'`)
-4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Crear Pull Request
-
----
-
-## 📞 Soporte
-
-- **Issues**: [GitHub Issues](https://github.com/reyer3/faco_weekly/issues)
-- **Documentación**: [docs/](docs/)
-- **Email**: Contactar al equipo de desarrollo
-
----
-
-## 📄 Licencia
-
-MIT License - Ver archivo [LICENSE](LICENSE) para detalles.
-
----
-
-**🎯 Desarrollado para Telefónica del Perú - Sistema de Gestión de Cobranza**  
-*Versión 2.2.0 - Junio 2025*
-
----
-
-## 🏆 Changelog v2.2.0
-
-### ✨ Nuevas Funcionalidades
-- ➕ Generación automática de reportes Excel y PowerPoint
-- ➕ Endpoint `/generate-reports` con múltiples formatos
-- ➕ Endpoints de descarga `/download-excel` y `/download-powerpoint`
-- ➕ KPIs automáticos y recomendaciones inteligentes
-- ➕ Script de pruebas comprehensivo `test_reports.py`
-
-### 🔧 Mejoras
-- ⚡ Optimización de queries BigQuery para reportes
-- 🎨 Branding Telefónica aplicado a todos los archivos
-- 📊 Métricas consolidadas por canal y campaña
-- 🔄 Integración completa con pipeline existente
-
-### 🐛 Correcciones
-- ✅ Lógica de vigencias corregida por campaña específica
-- ✅ Homologación unificada CALL + VOICEBOT
-- ✅ Atribución mejorada de pagos a gestiones
-- ✅ Manejo robusto de errores y validaciones
-
----
-
-*¡Sistema listo para automatizar completamente los reportes semanales! 🚀*
+**🎉 Sistema listo para generar reportes ejecutivos automatizados sin errores de compilación!**
