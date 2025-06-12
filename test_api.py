@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Test Script para FACO Weekly API
-================================
+Test Script Avanzado para FACO Weekly API v2.0
+===============================================
 
-Script simple para probar la funcionalidad del sistema.
+Script actualizado para probar la funcionalidad avanzada con homologación.
 """
 
 import requests
@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 API_BASE_URL = "http://localhost:8000"
 
 def test_health():
-    """Test de conectividad y salud del sistema"""
-    print("🔍 Verificando estado del sistema...")
+    """Test de conectividad y salud del sistema avanzado"""
+    print("🔍 Verificando estado del sistema avanzado...")
     
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=10)
@@ -25,6 +25,16 @@ def test_health():
             data = response.json()
             print(f"✅ Sistema: {data['status']}")
             print(f"📊 BigQuery: {data['bigquery']}")
+            
+            # Mostrar estado de tablas de homologación
+            if 'homologacion_tables' in data:
+                print("🔗 Tablas de Homologación:")
+                for table, count in data['homologacion_tables'].items():
+                    if isinstance(count, int):
+                        print(f"   📋 {table}: {count:,} registros")
+                    else:
+                        print(f"   ❌ {table}: {count}")
+            
             return True
         else:
             print(f"❌ Error de salud: {response.status_code}")
@@ -37,9 +47,41 @@ def test_health():
         print(f"❌ Error inesperado: {e}")
         return False
 
+def test_homologation_status():
+    """Test específico del estado de homologación"""
+    print("\n🔗 Verificando estado de homologación...")
+    
+    try:
+        response = requests.get(f"{API_BASE_URL}/homologation-status", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Estado: {data['status']}")
+            
+            print("\n📊 Tablas de Homologación:")
+            for table, count in data['tablas_homologacion'].items():
+                if isinstance(count, int):
+                    status_icon = "✅" if count > 0 else "⚠️"
+                    print(f"   {status_icon} {table}: {count:,} registros")
+                else:
+                    print(f"   ❌ {table}: {count}")
+            
+            print("\n📝 Observaciones:")
+            for table, desc in data['observaciones'].items():
+                print(f"   • {table}: {desc}")
+            
+            return True
+        else:
+            print(f"❌ Error verificando homologación: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
+
 def test_api_info():
-    """Test de información general del API"""
-    print("\nℹ️ Obteniendo información del API...")
+    """Test de información general del API avanzado"""
+    print("\nℹ️ Información del API Avanzado...")
     
     try:
         response = requests.get(f"{API_BASE_URL}/", timeout=10)
@@ -48,6 +90,11 @@ def test_api_info():
             data = response.json()
             print(f"📡 {data['message']}")
             print(f"🔢 Versión: {data['version']}")
+            
+            print("🚀 Características:")
+            for feature in data.get('features', []):
+                print(f"   • {feature}")
+            
             print("📋 Endpoints disponibles:")
             for endpoint, desc in data['endpoints'].items():
                 print(f"   {endpoint}: {desc}")
@@ -60,9 +107,9 @@ def test_api_info():
         print(f"❌ Error: {e}")
         return False
 
-def test_process_weekly(fecha_inicio=None, fecha_fin=None):
-    """Test de procesamiento semanal"""
-    print("\n📊 Probando procesamiento semanal...")
+def test_advanced_processing(fecha_inicio=None, fecha_fin=None):
+    """Test de procesamiento avanzado con homologación"""
+    print("\n🧠 Probando procesamiento avanzado...")
     
     # Configurar fechas por defecto
     if not fecha_fin:
@@ -79,47 +126,75 @@ def test_process_weekly(fecha_inicio=None, fecha_fin=None):
     
     try:
         response = requests.post(
-            f"{API_BASE_URL}/process-weekly",
+            f"{API_BASE_URL}/process-advanced",
             json=payload,
-            timeout=120  # 2 minutos para procesamiento
+            timeout=180  # 3 minutos para procesamiento avanzado
         )
         
         if response.status_code == 200:
             data = response.json()
             
-            print("✅ Procesamiento exitoso!")
+            print("✅ Procesamiento avanzado exitoso!")
             print(f"📋 Estado: {data['status']}")
+            print(f"🔢 Versión: {data['version']}")
             
-            # Mostrar estadísticas del calendario
-            calendario = data.get('calendario', {})
-            print(f"📅 Campañas activas: {calendario.get('campañas_activas', 0)}")
-            print(f"📁 Archivos procesados: {calendario.get('archivos_procesados', 0)}")
+            # Mostrar estado de homologación
+            homolog = data.get('homologacion', {})
+            if 'problemas_detectados' in homolog:
+                issues = homolog['problemas_detectados']
+                print(f"\n🔍 Análisis de Homologación:")
+                print(f"   📊 Total gestiones: {issues.get('total_gestiones', 0):,}")
+                print(f"   ❌ No homologadas: {issues.get('no_homologadas', 0)} ({issues.get('no_homologadas_pct', 0)}%)")
+                print(f"   👤 Sin DNI: {issues.get('sin_dni', 0)} ({issues.get('sin_dni_pct', 0)}%)")
+                print(f"   🆔 Sin identificar: {issues.get('ejecutivos_sin_identificar', 0)} ({issues.get('ejecutivos_sin_identificar_pct', 0)}%)")
+                print(f"   ⚖️ Peso cero: {issues.get('peso_cero', 0)} ({issues.get('peso_cero_pct', 0)}%)")
             
             # Mostrar datos procesados
             datos = data.get('datos_procesados', {})
-            print(f"👥 Asignaciones: {datos.get('asignaciones', 0):,}")
-            print(f"🎯 Universo gestionable: {datos.get('universo_gestionable', 0):,}")
-            print(f"📞 Gestiones: {datos.get('gestiones', 0):,}")
-            print(f"💰 Pagos: {datos.get('pagos', 0):,}")
-            print(f"🔗 Atribuciones: {datos.get('atribuciones', 0):,}")
+            print(f"\n📊 Datos Procesados:")
+            print(f"   📅 Campañas calendario: {datos.get('campañas_calendario', 0)}")
+            print(f"   🎯 Gestiones unificadas: {datos.get('gestiones_unificadas', 0):,}")
+            print(f"   👥 Asignaciones fact: {datos.get('asignaciones_fact', 0):,}")
+            print(f"   💰 Pagos: {datos.get('pagos', 0):,}")
             
-            # Mostrar KPIs
-            metricas = data.get('metricas', {})
-            if 'kpis' in metricas:
-                kpis = metricas['kpis']
-                print(f"📈 Contactabilidad: {kpis.get('tasa_contactabilidad', 0)}%")
-                print(f"🎯 Atribución: {kpis.get('tasa_atribucion', 0)}%")
-                print(f"⚡ Intensidad: {kpis.get('intensidad_gestion', 0)}")
-                print(f"💵 Ticket promedio: S/ {kpis.get('ticket_promedio_pago', 0):,.2f}")
+            # Mostrar KPIs avanzados
+            kpis = data.get('kpis_avanzados', {})
+            if 'kpis_generales' in kpis:
+                kpis_gen = kpis['kpis_generales']
+                print(f"\n📈 KPIs Avanzados:")
+                print(f"   👥 Clientes gestionados: {kpis_gen.get('clientes_gestionados', 0):,}")
+                print(f"   📞 Contactabilidad efectiva: {kpis_gen.get('tasa_contactabilidad_efectiva', 0)}%")
+                print(f"   🎯 Tasa PDP: {kpis_gen.get('tasa_pdp', 0)}%")
+                print(f"   💰 Monto compromisos: S/ {kpis_gen.get('monto_total_compromisos', 0):,.2f}")
+                print(f"   🎫 Ticket promedio: S/ {kpis_gen.get('ticket_promedio_compromiso', 0):,.2f}")
+                print(f"   📊 Cobertura gestión: {kpis_gen.get('cobertura_gestion', 0)}%")
             
-            # Mostrar top agentes
-            top_agentes = data.get('top_agentes', [])
-            if top_agentes:
-                print(f"\n🏆 Top {len(top_agentes)} Agentes:")
-                for i, agente in enumerate(top_agentes, 1):
-                    print(f"   {i}. {agente.get('ejecutivo', 'N/A')} - "
-                          f"Gestiones: {agente.get('total_gestiones', 0)}, "
-                          f"Contactabilidad: {agente.get('tasa_contactabilidad', 0)}%")
+            # Mostrar análisis de contactabilidad
+            contact_analysis = data.get('analisis_contactabilidad', {})
+            if 'contactabilidad_distribucion' in contact_analysis:
+                print(f"\n📊 Distribución Contactabilidad:")
+                for tipo, cantidad in contact_analysis['contactabilidad_distribucion'].items():
+                    print(f"   📋 {tipo}: {cantidad}")
+            
+            # Mostrar top ejecutivos
+            ranking = data.get('ranking_ejecutivos', [])
+            if ranking:
+                print(f"\n🏆 Top {len(ranking)} Ejecutivos:")
+                for i, exec_data in enumerate(ranking, 1):
+                    print(f"   {i}. {exec_data.get('ejecutivo', 'N/A')} ({exec_data.get('canal', 'N/A')})")
+                    print(f"      💼 DNI: {exec_data.get('dni_ejecutivo', 'N/A')}")
+                    print(f"      📞 Gestiones: {exec_data.get('total_gestiones', 0)}")
+                    print(f"      📈 Contactabilidad: {exec_data.get('tasa_contactabilidad_efectiva', 0)}%")
+                    print(f"      💰 Monto: S/ {exec_data.get('monto_comprometido', 0):,.2f}")
+                    print(f"      🏅 Score: {exec_data.get('productividad_score', 0)}")
+                    print()
+            
+            # Mostrar resumen de campañas
+            campaigns = data.get('resumen_campañas', [])
+            if campaigns:
+                print(f"📋 Resumen por Cartera:")
+                for campaign in campaigns:
+                    print(f"   🎯 {campaign.get('cartera', 'N/A')}: {campaign.get('clientes_asignados', 0)} asignados")
             
             return True
             
@@ -133,52 +208,74 @@ def test_process_weekly(fecha_inicio=None, fecha_fin=None):
             return False
             
     except requests.exceptions.Timeout:
-        print("⏰ Timeout: El procesamiento tomó más de 2 minutos")
+        print("⏰ Timeout: El procesamiento tomó más de 3 minutos")
         return False
     except Exception as e:
         print(f"❌ Error: {e}")
         return False
 
 def run_all_tests():
-    """Ejecuta todos los tests en secuencia"""
-    print("🚀 INICIANDO TESTS FACO WEEKLY")
-    print("=" * 50)
+    """Ejecuta todos los tests avanzados en secuencia"""
+    print("🚀 INICIANDO TESTS FACO WEEKLY v2.0 (AVANZADO)")
+    print("=" * 60)
     
     # Test 1: Health check
     if not test_health():
         print("\n❌ Tests abortados: Sistema no disponible")
         return False
     
-    # Test 2: Info del API
+    # Test 2: Estado de homologación
+    if not test_homologation_status():
+        print("\n⚠️ Advertencia: Problemas con tablas de homologación")
+    
+    # Test 3: Info del API
     if not test_api_info():
         print("\n⚠️ Advertencia: No se pudo obtener info del API")
     
-    # Test 3: Procesamiento semanal
-    print("\n" + "=" * 50)
-    if not test_process_weekly():
-        print("\n❌ Test de procesamiento falló")
+    # Test 4: Procesamiento avanzado
+    print("\n" + "=" * 60)
+    if not test_advanced_processing():
+        print("\n❌ Test de procesamiento avanzado falló")
         return False
     
-    print("\n" + "=" * 50)
-    print("✅ TODOS LOS TESTS COMPLETADOS EXITOSAMENTE")
+    print("\n" + "=" * 60)
+    print("✅ TODOS LOS TESTS AVANZADOS COMPLETADOS EXITOSAMENTE")
+    print("🎉 Sistema con homologación funcionando correctamente")
     return True
 
 def main():
-    """Función principal"""
+    """Función principal con opciones avanzadas"""
     if len(sys.argv) > 1:
-        if sys.argv[1] == "health":
+        command = sys.argv[1].lower()
+        
+        if command == "health":
             test_health()
-        elif sys.argv[1] == "info":
+        elif command == "homolog":
+            test_homologation_status()
+        elif command == "info":
             test_api_info()
-        elif sys.argv[1] == "process":
+        elif command == "advanced":
             # Permitir fechas customizadas
             fecha_inicio = sys.argv[2] if len(sys.argv) > 2 else None
             fecha_fin = sys.argv[3] if len(sys.argv) > 3 else None
-            test_process_weekly(fecha_inicio, fecha_fin)
+            test_advanced_processing(fecha_inicio, fecha_fin)
+        elif command == "full":
+            run_all_tests()
         else:
-            print("Uso: python test_api.py [health|info|process] [fecha_inicio] [fecha_fin]")
+            print("Uso: python test_api.py [health|homolog|info|advanced|full] [fecha_inicio] [fecha_fin]")
+            print("")
+            print("Comandos disponibles:")
+            print("  health    - Solo health check")
+            print("  homolog   - Estado de homologación")
+            print("  info      - Información del API")
+            print("  advanced  - Procesamiento avanzado")
+            print("  full      - Todos los tests")
+            print("")
+            print("Ejemplos:")
+            print("  python test_api.py advanced 2025-06-01 2025-06-12")
+            print("  python test_api.py full")
     else:
-        # Ejecutar todos los tests
+        # Ejecutar todos los tests por defecto
         run_all_tests()
 
 if __name__ == "__main__":
