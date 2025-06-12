@@ -1,12 +1,19 @@
 """
-REPORT GENERATOR - Telefónica del Perú
-=====================================
+REPORT GENERATOR - Telefónica del Perú (VERSIÓN CORREGIDA)
+===========================================================
 
 Módulo para generar reportes semanales automatizados en Excel y PowerPoint
-integrando con el sistema de gestión de cobranza existente.
+SIN dependencias problemáticas de matplotlib o compilación C.
+
+Características:
+- Generación Excel con openpyxl (sin matplotlib)
+- Presentaciones PowerPoint con python-pptx
+- Análisis consolidado CALL vs VOICEBOT
+- Métricas ejecutivas automatizadas
+- Formato corporativo Telefónica
 
 Autor: Sistema Automatizado FACO Weekly
-Fecha: Junio 2025
+Fecha: Junio 2025 - Versión Corregida
 """
 
 import pandas as pd
@@ -17,12 +24,13 @@ import os
 from typing import Dict, List, Optional, Tuple
 import logging
 
-# Excel libraries
+# Excel libraries (sin matplotlib)
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.worksheet.table import Table, TableStyleInfo
+import xlsxwriter
 
 # PowerPoint libraries
 from pptx import Presentation
@@ -30,15 +38,13 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
 
 logger = logging.getLogger(__name__)
 
 class TelefonicaReportGenerator:
     """
     Generador de reportes semanales para Telefónica del Perú
-    Crea archivos Excel y PowerPoint con datos de gestión de cobranza
+    VERSIÓN CORREGIDA - Sin dependencias problemáticas
     """
     
     # Colores corporativos Telefónica
@@ -65,7 +71,7 @@ class TelefonicaReportGenerator:
         self.periodo_str = f"{fecha_inicio} a {fecha_fin}"
         self.fecha_generacion = datetime.now()
         
-        # Estructura de datos que se llenará con información procesada
+        # Estructura de datos
         self.data = {
             'resumen_ejecutivo': {},
             'canal_call': {},
@@ -73,9 +79,10 @@ class TelefonicaReportGenerator:
             'evolucion_diaria': [],
             'carteras_activas': [],
             'kpis_consolidados': {},
-            'comparativas': {},
             'recomendaciones': []
         }
+        
+        logger.info(f"🚀 Iniciando generador de reportes para período: {self.periodo_str}")
     
     def load_data_from_processing(self, 
                                 gestiones_df: pd.DataFrame,
@@ -85,267 +92,324 @@ class TelefonicaReportGenerator:
                                 kpis_campania: List[Dict]) -> None:
         """
         Cargar datos desde el procesamiento principal
-        
-        Args:
-            gestiones_df: DataFrame con gestiones procesadas
-            calendario_df: DataFrame con calendario de vigencias
-            asignacion_df: DataFrame con resumen de asignaciones
-            pagos_df: DataFrame con pagos del período
-            kpis_campania: Lista de KPIs por campaña
         """
-        logger.info("Cargando datos para generación de reportes")
+        logger.info("📊 Cargando datos para generación de reportes")
         
-        # Procesar datos de gestiones
-        self._process_gestiones_data(gestiones_df)
-        
-        # Procesar datos de calendario y asignaciones
-        self._process_calendario_data(calendario_df, asignacion_df)
-        
-        # Procesar datos de pagos
-        self._process_pagos_data(pagos_df)
-        
-        # Procesar KPIs por campaña
-        self._process_kpis_campania(kpis_campania)
-        
-        # Calcular métricas consolidadas
-        self._calculate_consolidated_metrics()
-        
-        # Generar recomendaciones automáticas
-        self._generate_recommendations()
-        
-        logger.info("Datos cargados y procesados exitosamente")
+        try:
+            # Procesar datos de gestiones
+            self._process_gestiones_data(gestiones_df)
+            
+            # Procesar datos de calendario y asignaciones
+            self._process_calendario_data(calendario_df, asignacion_df)
+            
+            # Procesar datos de pagos
+            self._process_pagos_data(pagos_df)
+            
+            # Procesar KPIs por campaña
+            self._process_kpis_campania(kpis_campania)
+            
+            # Calcular métricas consolidadas
+            self._calculate_consolidated_metrics()
+            
+            # Generar recomendaciones automáticas
+            self._generate_recommendations()
+            
+            logger.info("✅ Datos cargados y procesados exitosamente")
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando datos: {str(e)}")
+            raise
     
     def _process_gestiones_data(self, gestiones_df: pd.DataFrame) -> None:
         """Procesar datos de gestiones por canal"""
         if gestiones_df.empty:
-            logger.warning("No hay datos de gestiones para procesar")
+            logger.warning("⚠️ No hay datos de gestiones para procesar")
             return
         
-        # Separar por canal
-        call_data = gestiones_df[gestiones_df['canal'] == 'CALL']
-        voicebot_data = gestiones_df[gestiones_df['canal'] == 'VOICEBOT']
-        
-        # Métricas CALL
-        self.data['canal_call'] = {
-            'total_gestiones': len(call_data),
-            'contactos_efectivos': len(call_data[call_data['contactabilidad'] == 'CONTACTO_EFECTIVO']),
-            'contactos_no_efectivos': len(call_data[call_data['contactabilidad'] == 'CONTACTO_NO_EFECTIVO']),
-            'no_contactos': len(call_data[call_data['contactabilidad'] == 'NO_CONTACTO']),
-            'compromisos': len(call_data[call_data['es_pdp'] == 'SI']),
-            'monto_compromisos': call_data['monto_compromiso'].sum(),
-            'clientes_unicos': call_data['cod_luna'].nunique(),
-            'duracion_promedio': call_data['duracion'].mean() if 'duracion' in call_data.columns else 0
-        }
-        
-        # Calcular tasas CALL
-        if self.data['canal_call']['total_gestiones'] > 0:
-            self.data['canal_call']['tasa_contactabilidad'] = round(
-                self.data['canal_call']['contactos_efectivos'] / self.data['canal_call']['total_gestiones'] * 100, 2
-            )
-            if self.data['canal_call']['contactos_efectivos'] > 0:
-                self.data['canal_call']['tasa_compromiso'] = round(
-                    self.data['canal_call']['compromisos'] / self.data['canal_call']['contactos_efectivos'] * 100, 2
-                )
-        
-        # Métricas VOICEBOT
-        self.data['canal_voicebot'] = {
-            'total_gestiones': len(voicebot_data),
-            'contactos_efectivos': len(voicebot_data[voicebot_data['contactabilidad'] == 'CONTACTO_EFECTIVO']),
-            'compromisos': len(voicebot_data[voicebot_data['es_pdp'] == 'SI']),
-            'clientes_unicos': voicebot_data['cod_luna'].nunique()
-        }
-        
-        # Calcular tasas VOICEBOT
-        if self.data['canal_voicebot']['total_gestiones'] > 0:
-            self.data['canal_voicebot']['tasa_contactabilidad'] = round(
-                self.data['canal_voicebot']['contactos_efectivos'] / self.data['canal_voicebot']['total_gestiones'] * 100, 2
-            )
-            if self.data['canal_voicebot']['contactos_efectivos'] > 0:
-                self.data['canal_voicebot']['tasa_compromiso'] = round(
-                    self.data['canal_voicebot']['compromisos'] / self.data['canal_voicebot']['contactos_efectivos'] * 100, 2
-                )
-        
-        # Evolución diaria
-        gestiones_df['fecha'] = pd.to_datetime(gestiones_df['date']).dt.date
-        evolucion_call = call_data.groupby('fecha').agg({
-            'cod_luna': 'count',
-            'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum()
-        }).rename(columns={'cod_luna': 'gestiones_call', 'contactabilidad': 'contactos_call'})
-        
-        evolucion_voicebot = voicebot_data.groupby('fecha').agg({
-            'cod_luna': 'count',
-            'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum()
-        }).rename(columns={'cod_luna': 'gestiones_voicebot', 'contactabilidad': 'contactos_voicebot'})
-        
-        # Combinar evolución diaria
-        evolucion_completa = evolucion_call.join(evolucion_voicebot, how='outer').fillna(0)
-        evolucion_completa['total_gestiones'] = evolucion_completa['gestiones_call'] + evolucion_completa['gestiones_voicebot']
-        evolucion_completa['total_contactos'] = evolucion_completa['contactos_call'] + evolucion_completa['contactos_voicebot']
-        
-        self.data['evolucion_diaria'] = [
-            {
-                'fecha': fecha.strftime('%Y-%m-%d'),
-                'call_gestiones': int(row['gestiones_call']),
-                'call_contactos': int(row['contactos_call']),
-                'voicebot_gestiones': int(row['gestiones_voicebot']),
-                'voicebot_contactos': int(row['contactos_voicebot']),
-                'total_gestiones': int(row['total_gestiones']),
-                'total_contactos': int(row['total_contactos']),
-                'tasa_contactabilidad': round(row['total_contactos'] / row['total_gestiones'] * 100, 2) if row['total_gestiones'] > 0 else 0
+        try:
+            # Separar por canal
+            call_data = gestiones_df[gestiones_df['canal'] == 'CALL']
+            voicebot_data = gestiones_df[gestiones_df['canal'] == 'VOICEBOT']
+            
+            # Métricas CALL
+            self.data['canal_call'] = self._calculate_channel_metrics(call_data, 'CALL')
+            
+            # Métricas VOICEBOT
+            self.data['canal_voicebot'] = self._calculate_channel_metrics(voicebot_data, 'VOICEBOT')
+            
+            # Evolución diaria
+            self._calculate_daily_evolution(gestiones_df)
+            
+        except Exception as e:
+            logger.error(f"Error procesando gestiones: {str(e)}")
+            raise
+    
+    def _calculate_channel_metrics(self, channel_data: pd.DataFrame, channel_name: str) -> Dict:
+        """Calcular métricas para un canal específico"""
+        if channel_data.empty:
+            return {
+                'total_gestiones': 0,
+                'contactos_efectivos': 0,
+                'contactos_no_efectivos': 0,
+                'no_contactos': 0,
+                'compromisos': 0,
+                'monto_compromisos': 0,
+                'clientes_unicos': 0,
+                'tasa_contactabilidad': 0,
+                'tasa_compromiso': 0,
+                'duracion_promedio': 0
             }
-            for fecha, row in evolucion_completa.iterrows()
-        ]
+        
+        # Métricas básicas
+        total_gestiones = len(channel_data)
+        contactos_efectivos = len(channel_data[channel_data['contactabilidad'] == 'CONTACTO_EFECTIVO'])
+        contactos_no_efectivos = len(channel_data[channel_data['contactabilidad'] == 'CONTACTO_NO_EFECTIVO'])
+        no_contactos = len(channel_data[channel_data['contactabilidad'] == 'NO_CONTACTO'])
+        compromisos = len(channel_data[channel_data['es_pdp'] == 'SI'])
+        monto_compromisos = channel_data['monto_compromiso'].sum() if 'monto_compromiso' in channel_data.columns else 0
+        clientes_unicos = channel_data['cod_luna'].nunique()
+        
+        # Duración promedio (solo para CALL)
+        duracion_promedio = 0
+        if channel_name == 'CALL' and 'duracion' in channel_data.columns:
+            duracion_promedio = channel_data['duracion'].mean()
+        
+        # Calcular tasas
+        tasa_contactabilidad = round(contactos_efectivos / max(total_gestiones, 1) * 100, 2)
+        tasa_compromiso = round(compromisos / max(contactos_efectivos, 1) * 100, 2)
+        
+        return {
+            'total_gestiones': total_gestiones,
+            'contactos_efectivos': contactos_efectivos,
+            'contactos_no_efectivos': contactos_no_efectivos,
+            'no_contactos': no_contactos,
+            'compromisos': compromisos,
+            'monto_compromisos': monto_compromisos,
+            'clientes_unicos': clientes_unicos,
+            'tasa_contactabilidad': tasa_contactabilidad,
+            'tasa_compromiso': tasa_compromiso,
+            'duracion_promedio': round(duracion_promedio, 1)
+        }
+    
+    def _calculate_daily_evolution(self, gestiones_df: pd.DataFrame) -> None:
+        """Calcular evolución diaria"""
+        try:
+            if gestiones_df.empty:
+                return
+            
+            # Asegurar que date es datetime
+            if 'date' in gestiones_df.columns:
+                gestiones_df['fecha'] = pd.to_datetime(gestiones_df['date']).dt.date
+            else:
+                logger.warning("No hay columna 'date' en gestiones")
+                return
+            
+            # Separar por canal
+            call_data = gestiones_df[gestiones_df['canal'] == 'CALL']
+            voicebot_data = gestiones_df[gestiones_df['canal'] == 'VOICEBOT']
+            
+            # Evolución CALL
+            evolucion_call = call_data.groupby('fecha').agg({
+                'cod_luna': 'count',
+                'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum()
+            }).rename(columns={'cod_luna': 'gestiones_call', 'contactabilidad': 'contactos_call'})
+            
+            # Evolución VOICEBOT
+            evolucion_voicebot = voicebot_data.groupby('fecha').agg({
+                'cod_luna': 'count',
+                'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum()
+            }).rename(columns={'cod_luna': 'gestiones_voicebot', 'contactabilidad': 'contactos_voicebot'})
+            
+            # Combinar evolución diaria
+            evolucion_completa = evolucion_call.join(evolucion_voicebot, how='outer').fillna(0)
+            evolucion_completa['total_gestiones'] = evolucion_completa['gestiones_call'] + evolucion_completa['gestiones_voicebot']
+            evolucion_completa['total_contactos'] = evolucion_completa['contactos_call'] + evolucion_completa['contactos_voicebot']
+            
+            self.data['evolucion_diaria'] = [
+                {
+                    'fecha': fecha.strftime('%Y-%m-%d'),
+                    'call_gestiones': int(row['gestiones_call']),
+                    'call_contactos': int(row['contactos_call']),
+                    'voicebot_gestiones': int(row['gestiones_voicebot']),
+                    'voicebot_contactos': int(row['contactos_voicebot']),
+                    'total_gestiones': int(row['total_gestiones']),
+                    'total_contactos': int(row['total_contactos']),
+                    'tasa_contactabilidad': round(row['total_contactos'] / max(row['total_gestiones'], 1) * 100, 2)
+                }
+                for fecha, row in evolucion_completa.iterrows()
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error calculando evolución diaria: {str(e)}")
+            self.data['evolucion_diaria'] = []
     
     def _process_calendario_data(self, calendario_df: pd.DataFrame, asignacion_df: pd.DataFrame) -> None:
         """Procesar datos de calendario y asignaciones"""
-        if not calendario_df.empty:
-            self.data['carteras_activas'] = [
-                {
-                    'archivo': row['archivo'],
-                    'tipo_cartera': row['tipo_cartera'],
-                    'fecha_asignacion': row['fecha_asignacion'].strftime('%Y-%m-%d'),
-                    'fecha_cierre': row['fecha_cierre'].strftime('%Y-%m-%d'),
-                    'suma_lineas': row['suma_lineas'] if 'suma_lineas' in row else 0,
-                    'dias_vigencia': row['dias_vigencia'] if 'dias_vigencia' in row else 0,
-                    'estado': row['estado_vigencia'] if 'estado_vigencia' in row else 'ACTIVA'
-                }
-                for _, row in calendario_df.iterrows()
-            ]
-        
-        if not asignacion_df.empty:
-            # Agregar información de asignaciones a carteras activas
-            for cartera in self.data['carteras_activas']:
-                asig_data = asignacion_df[asignacion_df['archivo'] == cartera['archivo']]
-                if not asig_data.empty:
-                    cartera.update({
-                        'clientes_asignados': int(asig_data.iloc[0]['clientes_asignados']),
-                        'cuentas_asignadas': int(asig_data.iloc[0]['cuentas_asignadas'])
-                    })
+        try:
+            if not calendario_df.empty:
+                self.data['carteras_activas'] = [
+                    {
+                        'archivo': row['archivo'],
+                        'tipo_cartera': row.get('tipo_cartera', 'N/A'),
+                        'fecha_asignacion': row['fecha_asignacion'].strftime('%Y-%m-%d') if hasattr(row['fecha_asignacion'], 'strftime') else str(row['fecha_asignacion']),
+                        'fecha_cierre': row['fecha_cierre'].strftime('%Y-%m-%d') if hasattr(row['fecha_cierre'], 'strftime') else str(row['fecha_cierre']),
+                        'suma_lineas': row.get('suma_lineas', 0),
+                        'dias_vigencia': row.get('dias_vigencia', 0),
+                        'estado': row.get('estado_vigencia', 'ACTIVA')
+                    }
+                    for _, row in calendario_df.iterrows()
+                ]
+            
+            # Agregar información de asignaciones
+            if not asignacion_df.empty:
+                for cartera in self.data['carteras_activas']:
+                    asig_data = asignacion_df[asignacion_df['archivo'] == cartera['archivo']]
+                    if not asig_data.empty:
+                        cartera.update({
+                            'clientes_asignados': int(asig_data.iloc[0].get('clientes_asignados', 0)),
+                            'cuentas_asignadas': int(asig_data.iloc[0].get('cuentas_asignadas', 0))
+                        })
+                        
+        except Exception as e:
+            logger.error(f"Error procesando calendario: {str(e)}")
+            self.data['carteras_activas'] = []
     
     def _process_pagos_data(self, pagos_df: pd.DataFrame) -> None:
         """Procesar datos de pagos"""
-        if not pagos_df.empty:
-            self.data['pagos'] = {
-                'total_pagos': len(pagos_df),
-                'clientes_con_pago': pagos_df['nro_documento'].nunique(),
-                'monto_total': pagos_df['monto_cancelado'].sum(),
-                'ticket_promedio': pagos_df['monto_cancelado'].mean(),
-                'monto_min': pagos_df['monto_cancelado'].min(),
-                'monto_max': pagos_df['monto_cancelado'].max()
-            }
-        else:
-            self.data['pagos'] = {
-                'total_pagos': 0,
-                'clientes_con_pago': 0,
-                'monto_total': 0,
-                'ticket_promedio': 0,
-                'monto_min': 0,
-                'monto_max': 0
-            }
+        try:
+            if not pagos_df.empty:
+                self.data['pagos'] = {
+                    'total_pagos': len(pagos_df),
+                    'clientes_con_pago': pagos_df['nro_documento'].nunique(),
+                    'monto_total': pagos_df['monto_cancelado'].sum(),
+                    'ticket_promedio': pagos_df['monto_cancelado'].mean(),
+                    'monto_min': pagos_df['monto_cancelado'].min(),
+                    'monto_max': pagos_df['monto_cancelado'].max()
+                }
+            else:
+                self.data['pagos'] = {
+                    'total_pagos': 0,
+                    'clientes_con_pago': 0,
+                    'monto_total': 0,
+                    'ticket_promedio': 0,
+                    'monto_min': 0,
+                    'monto_max': 0
+                }
+        except Exception as e:
+            logger.error(f"Error procesando pagos: {str(e)}")
+            self.data['pagos'] = {'total_pagos': 0, 'clientes_con_pago': 0, 'monto_total': 0, 'ticket_promedio': 0, 'monto_min': 0, 'monto_max': 0}
     
     def _process_kpis_campania(self, kpis_campania: List[Dict]) -> None:
         """Procesar KPIs por campaña"""
-        self.data['kpis_por_campania'] = kpis_campania
+        self.data['kpis_por_campania'] = kpis_campania or []
     
     def _calculate_consolidated_metrics(self) -> None:
         """Calcular métricas consolidadas"""
-        call = self.data['canal_call']
-        voicebot = self.data['canal_voicebot']
-        
-        total_gestiones = call.get('total_gestiones', 0) + voicebot.get('total_gestiones', 0)
-        total_contactos = call.get('contactos_efectivos', 0) + voicebot.get('contactos_efectivos', 0)
-        total_compromisos = call.get('compromisos', 0) + voicebot.get('compromisos', 0)
-        
-        self.data['resumen_ejecutivo'] = {
-            'total_gestiones': total_gestiones,
-            'total_contactos_efectivos': total_contactos,
-            'total_compromisos': total_compromisos,
-            'tasa_contactabilidad_global': round(total_contactos / total_gestiones * 100, 2) if total_gestiones > 0 else 0,
-            'tasa_compromiso_global': round(total_compromisos / total_contactos * 100, 2) if total_contactos > 0 else 0,
-            'monto_compromisos_call': call.get('monto_compromisos', 0),
-            'clientes_unicos_total': call.get('clientes_unicos', 0) + voicebot.get('clientes_unicos', 0)
-        }
+        try:
+            call = self.data['canal_call']
+            voicebot = self.data['canal_voicebot']
+            
+            total_gestiones = call.get('total_gestiones', 0) + voicebot.get('total_gestiones', 0)
+            total_contactos = call.get('contactos_efectivos', 0) + voicebot.get('contactos_efectivos', 0)
+            total_compromisos = call.get('compromisos', 0) + voicebot.get('compromisos', 0)
+            
+            self.data['resumen_ejecutivo'] = {
+                'total_gestiones': total_gestiones,
+                'total_contactos_efectivos': total_contactos,
+                'total_compromisos': total_compromisos,
+                'tasa_contactabilidad_global': round(total_contactos / max(total_gestiones, 1) * 100, 2),
+                'tasa_compromiso_global': round(total_compromisos / max(total_contactos, 1) * 100, 2),
+                'monto_compromisos_call': call.get('monto_compromisos', 0),
+                'clientes_unicos_total': call.get('clientes_unicos', 0) + voicebot.get('clientes_unicos', 0)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculando métricas consolidadas: {str(e)}")
+            self.data['resumen_ejecutivo'] = {
+                'total_gestiones': 0,
+                'total_contactos_efectivos': 0,
+                'total_compromisos': 0,
+                'tasa_contactabilidad_global': 0,
+                'tasa_compromiso_global': 0,
+                'monto_compromisos_call': 0,
+                'clientes_unicos_total': 0
+            }
     
     def _generate_recommendations(self) -> None:
         """Generar recomendaciones automáticas basadas en datos"""
         recomendaciones = []
         
-        # Analizar contactabilidad por canal
-        call_contactabilidad = self.data['canal_call'].get('tasa_contactabilidad', 0)
-        voicebot_contactabilidad = self.data['canal_voicebot'].get('tasa_contactabilidad', 0)
-        
-        if voicebot_contactabilidad < 2.0:
-            recomendaciones.append({
-                'categoria': 'Optimización VOICEBOT',
-                'prioridad': 'Alta',
-                'descripcion': f'Mejorar scripts VOICEBOT - actual: {voicebot_contactabilidad}%, meta: 2%+',
-                'accion': 'Revisar y optimizar scripts de contacto automatizado'
-            })
-        
-        if call_contactabilidad > voicebot_contactabilidad * 3:
-            recomendaciones.append({
-                'categoria': 'Balanceo de Canales',
-                'prioridad': 'Media',
-                'descripcion': f'CALL ({call_contactabilidad}%) vs VOICEBOT ({voicebot_contactabilidad}%) - gran diferencia',
-                'accion': 'Redistribuir cartera para optimizar efectividad'
-            })
-        
-        # Analizar evolución diaria
-        if self.data['evolucion_diaria']:
-            contactabilidad_diaria = [dia['tasa_contactabilidad'] for dia in self.data['evolucion_diaria']]
-            if max(contactabilidad_diaria) - min(contactabilidad_diaria) > 2.0:
+        try:
+            # Analizar contactabilidad por canal
+            call_contactabilidad = self.data['canal_call'].get('tasa_contactabilidad', 0)
+            voicebot_contactabilidad = self.data['canal_voicebot'].get('tasa_contactabilidad', 0)
+            
+            if voicebot_contactabilidad < 2.0:
                 recomendaciones.append({
-                    'categoria': 'Consistencia Operativa',
-                    'prioridad': 'Media',
-                    'descripcion': 'Alta variabilidad en contactabilidad diaria',
-                    'accion': 'Estandarizar procesos y horarios de gestión'
+                    'categoria': 'Optimización VOICEBOT',
+                    'prioridad': 'Alta',
+                    'descripcion': f'Mejorar scripts VOICEBOT - actual: {voicebot_contactabilidad}%, meta: 2%+',
+                    'accion': 'Revisar y optimizar scripts de contacto automatizado'
                 })
-        
-        # Analizar compromisos
-        monto_compromisos = self.data['canal_call'].get('monto_compromisos', 0)
-        if monto_compromisos > 100000:
-            recomendaciones.append({
-                'categoria': 'Seguimiento Compromisos',
-                'prioridad': 'Alta',
-                'descripcion': f'${monto_compromisos:,.0f} en compromisos requiere seguimiento intensivo',
-                'accion': 'Implementar sistema de tracking de cumplimiento'
-            })
-        
-        self.data['recomendaciones'] = recomendaciones
+            
+            if call_contactabilidad > voicebot_contactabilidad * 3:
+                recomendaciones.append({
+                    'categoria': 'Balanceo de Canales',
+                    'prioridad': 'Media',
+                    'descripcion': f'CALL ({call_contactabilidad}%) vs VOICEBOT ({voicebot_contactabilidad}%) - gran diferencia',
+                    'accion': 'Redistribuir cartera para optimizar efectividad'
+                })
+            
+            # Analizar compromisos
+            monto_compromisos = self.data['canal_call'].get('monto_compromisos', 0)
+            if monto_compromisos > 100000:
+                recomendaciones.append({
+                    'categoria': 'Seguimiento Compromisos',
+                    'prioridad': 'Alta',
+                    'descripcion': f'${monto_compromisos:,.0f} en compromisos requiere seguimiento intensivo',
+                    'accion': 'Implementar sistema de tracking de cumplimiento'
+                })
+            
+            self.data['recomendaciones'] = recomendaciones
+            
+        except Exception as e:
+            logger.error(f"Error generando recomendaciones: {str(e)}")
+            self.data['recomendaciones'] = []
     
     def generate_excel_report(self, output_path: str = None) -> str:
         """
         Generar reporte Excel completo
-        
-        Args:
-            output_path: Ruta del archivo de salida (opcional)
-            
-        Returns:
-            Ruta del archivo Excel generado
         """
         if output_path is None:
             timestamp = self.fecha_generacion.strftime('%Y%m%d_%H%M%S')
             output_path = f"Informe_Semanal_Telefonica_{timestamp}.xlsx"
         
-        logger.info(f"Generando reporte Excel: {output_path}")
+        logger.info(f"📊 Generando reporte Excel: {output_path}")
         
-        # Crear workbook
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)  # Remover hoja por defecto
-        
-        # Generar hojas
-        self._create_excel_resumen_ejecutivo(wb)
-        self._create_excel_analisis_canales(wb)
-        self._create_excel_evolucion_diaria(wb)
-        self._create_excel_carteras_activas(wb)
-        self._create_excel_kpis_campanias(wb)
-        self._create_excel_recomendaciones(wb)
-        
-        # Guardar archivo
-        wb.save(output_path)
-        logger.info(f"Reporte Excel generado exitosamente: {output_path}")
-        
-        return output_path
+        try:
+            # Crear workbook
+            wb = openpyxl.Workbook()
+            wb.remove(wb.active)  # Remover hoja por defecto
+            
+            # Generar hojas
+            self._create_excel_resumen_ejecutivo(wb)
+            self._create_excel_analisis_canales(wb)
+            self._create_excel_evolucion_diaria(wb)
+            self._create_excel_carteras_activas(wb)
+            if self.data['kpis_por_campania']:
+                self._create_excel_kpis_campanias(wb)
+            if self.data['recomendaciones']:
+                self._create_excel_recomendaciones(wb)
+            
+            # Guardar archivo
+            wb.save(output_path)
+            logger.info(f"✅ Reporte Excel generado exitosamente: {output_path}")
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"❌ Error generando Excel: {str(e)}")
+            raise
     
     def _create_excel_resumen_ejecutivo(self, wb: openpyxl.Workbook) -> None:
         """Crear hoja de resumen ejecutivo"""
@@ -367,6 +431,7 @@ class TelefonicaReportGenerator:
         # Datos principales
         resumen = self.data['resumen_ejecutivo']
         data_rows = [
+            ['', '', '', ''],
             ['INDICADOR CLAVE', 'VALOR', 'MÉTRICA', 'OBSERVACIONES'],
             ['Total Gestiones', f"{resumen.get('total_gestiones', 0):,}", '100%', 'CALL + VOICEBOT'],
             ['Contactos Efectivos', f"{resumen.get('total_contactos_efectivos', 0):,}", 
@@ -379,7 +444,7 @@ class TelefonicaReportGenerator:
         ]
         
         # Agregar datos de pagos si están disponibles
-        if 'pagos' in self.data:
+        if 'pagos' in self.data and self.data['pagos']['total_pagos'] > 0:
             pagos = self.data['pagos']
             data_rows.extend([
                 ['Clientes con Pago', f"{pagos.get('clientes_con_pago', 0):,}", '-', 
@@ -392,7 +457,7 @@ class TelefonicaReportGenerator:
         for i, row_data in enumerate(data_rows, start=5):
             for j, value in enumerate(row_data, start=1):
                 cell = ws.cell(row=i, column=j, value=value)
-                if i == 5:  # Encabezados
+                if i == 6:  # Encabezados
                     cell.font = Font(bold=True, color=self.COLORS['white'])
                     cell.fill = PatternFill(start_color=self.COLORS['telefonica_light_blue'], 
                                           end_color=self.COLORS['telefonica_light_blue'], fill_type="solid")
@@ -417,6 +482,7 @@ class TelefonicaReportGenerator:
         # Canal CALL
         call_data = self.data['canal_call']
         call_rows = [
+            ['', '', ''],
             ['CANAL CALL', 'VALOR', 'PORCENTAJE'],
             ['Gestiones Totales', f"{call_data.get('total_gestiones', 0):,}", '-'],
             ['Contactos Efectivos', f"{call_data.get('contactos_efectivos', 0):,}", 
@@ -433,7 +499,7 @@ class TelefonicaReportGenerator:
         for i, row_data in enumerate(call_rows, start=3):
             for j, value in enumerate(row_data, start=1):
                 cell = ws.cell(row=i, column=j, value=value)
-                if i == 3:  # Encabezado
+                if i == 4:  # Encabezado
                     cell.font = Font(bold=True, color=self.COLORS['white'])
                     cell.fill = PatternFill(start_color=self.COLORS['telefonica_green'], 
                                           end_color=self.COLORS['telefonica_green'], fill_type="solid")
@@ -441,6 +507,7 @@ class TelefonicaReportGenerator:
         # Canal VOICEBOT
         voicebot_data = self.data['canal_voicebot']
         voicebot_rows = [
+            ['', '', ''],
             ['CANAL VOICEBOT', 'VALOR', 'PORCENTAJE'],
             ['Gestiones Totales', f"{voicebot_data.get('total_gestiones', 0):,}", '-'],
             ['Contactos Efectivos', f"{voicebot_data.get('contactos_efectivos', 0):,}", 
@@ -454,7 +521,7 @@ class TelefonicaReportGenerator:
         for i, row_data in enumerate(voicebot_rows, start=start_row):
             for j, value in enumerate(row_data, start=1):
                 cell = ws.cell(row=i, column=j, value=value)
-                if i == start_row:  # Encabezado
+                if i == start_row + 1:  # Encabezado
                     cell.font = Font(bold=True, color=self.COLORS['white'])
                     cell.fill = PatternFill(start_color=self.COLORS['telefonica_orange'], 
                                           end_color=self.COLORS['telefonica_orange'], fill_type="solid")
@@ -564,10 +631,6 @@ class TelefonicaReportGenerator:
                                    end_color=self.COLORS['telefonica_blue'], fill_type="solid")
         ws.merge_cells('A1:H1')
         
-        if not self.data['kpis_por_campania']:
-            ws['A3'] = "No hay datos de KPIs por campaña disponibles"
-            return
-        
         # Encabezados
         headers = ['Archivo', 'Total Gestiones', 'Clientes Gestionados', 'Contactos Efectivos', 
                   'PDPs', 'Monto Compromisos', 'Tasa Contactabilidad', 'Tasa PDP']
@@ -610,10 +673,6 @@ class TelefonicaReportGenerator:
                                    end_color=self.COLORS['telefonica_blue'], fill_type="solid")
         ws.merge_cells('A1:D1')
         
-        if not self.data['recomendaciones']:
-            ws['A3'] = "No hay recomendaciones específicas para este período"
-            return
-        
         # Encabezados
         headers = ['Categoría', 'Prioridad', 'Descripción', 'Acción Recomendada']
         
@@ -651,35 +710,34 @@ class TelefonicaReportGenerator:
     def generate_powerpoint_report(self, output_path: str = None) -> str:
         """
         Generar presentación PowerPoint ejecutiva
-        
-        Args:
-            output_path: Ruta del archivo de salida (opcional)
-            
-        Returns:
-            Ruta del archivo PowerPoint generado
         """
         if output_path is None:
             timestamp = self.fecha_generacion.strftime('%Y%m%d_%H%M%S')
             output_path = f"Presentacion_Semanal_Telefonica_{timestamp}.pptx"
         
-        logger.info(f"Generando presentación PowerPoint: {output_path}")
+        logger.info(f"📈 Generando presentación PowerPoint: {output_path}")
         
-        # Crear presentación
-        prs = Presentation()
-        
-        # Generar slides
-        self._create_ppt_portada(prs)
-        self._create_ppt_resumen_ejecutivo(prs)
-        self._create_ppt_analisis_canales(prs)
-        self._create_ppt_evolucion_temporal(prs)
-        self._create_ppt_carteras_activas(prs)
-        self._create_ppt_recomendaciones(prs)
-        
-        # Guardar presentación
-        prs.save(output_path)
-        logger.info(f"Presentación PowerPoint generada exitosamente: {output_path}")
-        
-        return output_path
+        try:
+            # Crear presentación
+            prs = Presentation()
+            
+            # Generar slides
+            self._create_ppt_portada(prs)
+            self._create_ppt_resumen_ejecutivo(prs)
+            self._create_ppt_analisis_canales(prs)
+            self._create_ppt_evolucion_temporal(prs)
+            self._create_ppt_carteras_activas(prs)
+            self._create_ppt_recomendaciones(prs)
+            
+            # Guardar presentación
+            prs.save(output_path)
+            logger.info(f"✅ Presentación PowerPoint generada exitosamente: {output_path}")
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"❌ Error generando PowerPoint: {str(e)}")
+            raise
     
     def _create_ppt_portada(self, prs: Presentation) -> None:
         """Crear slide de portada"""
@@ -692,7 +750,7 @@ class TelefonicaReportGenerator:
         title.text_frame.paragraphs[0].font.size = Pt(32)
         title.text_frame.paragraphs[0].font.bold = True
         
-        subtitle.text = f"Telefónica del Perú\n{self.periodo_str}\nSistema de Cobranza Automatizado"
+        subtitle.text = f"Telefónica del Perú\\n{self.periodo_str}\\nSistema de Cobranza Automatizado"
         subtitle.text_frame.paragraphs[0].font.size = Pt(18)
     
     def _create_ppt_resumen_ejecutivo(self, prs: Presentation) -> None:
@@ -717,7 +775,7 @@ class TelefonicaReportGenerator:
         ]
         
         # Agregar información de pagos si disponible
-        if 'pagos' in self.data:
+        if 'pagos' in self.data and self.data['pagos']['total_pagos'] > 0:
             pagos = self.data['pagos']
             paragraphs_data.append(f"• ${pagos.get('monto_total', 0):,.0f} en pagos procesados")
         
@@ -866,8 +924,19 @@ class TelefonicaReportGenerator:
         tf = content.text_frame
         
         if not self.data['recomendaciones']:
-            tf.text = "• No hay recomendaciones específicas para este período"
+            tf.text = "• Mantener monitoreo continuo de KPIs"
             tf.paragraphs[0].font.size = Pt(16)
+            
+            general_recs = [
+                "• Optimizar distribución de cartera entre canales",
+                "• Implementar mejoras continuas en procesos",
+                "• Desarrollar análisis predictivos"
+            ]
+            
+            for rec in general_recs:
+                p = tf.add_paragraph()
+                p.text = rec
+                p.font.size = Pt(14)
         else:
             # Tomar las 5 recomendaciones más importantes
             top_recommendations = self.data['recomendaciones'][:5]
@@ -880,29 +949,10 @@ class TelefonicaReportGenerator:
                     p = tf.add_paragraph()
                     p.text = f"• {rec['descripcion']}"
                     p.font.size = Pt(14)
-        
-        # Agregar recomendaciones generales si no hay específicas
-        if not self.data['recomendaciones']:
-            general_recs = [
-                "• Mantener monitoreo continuo de KPIs",
-                "• Optimizar distribución de cartera entre canales",
-                "• Implementar mejoras continuas en procesos"
-            ]
-            
-            for rec in general_recs:
-                p = tf.add_paragraph()
-                p.text = rec
-                p.font.size = Pt(14)
     
     def generate_complete_report(self, output_dir: str = None) -> Tuple[str, str]:
         """
         Generar reporte completo (Excel + PowerPoint)
-        
-        Args:
-            output_dir: Directorio de salida (opcional)
-            
-        Returns:
-            Tupla con rutas de archivos (excel_path, ppt_path)
         """
         if output_dir is None:
             output_dir = tempfile.gettempdir()
@@ -916,6 +966,6 @@ class TelefonicaReportGenerator:
         excel_file = self.generate_excel_report(excel_path)
         ppt_file = self.generate_powerpoint_report(ppt_path)
         
-        logger.info(f"Reportes completos generados en: {output_dir}")
+        logger.info(f"🎉 Reportes completos generados en: {output_dir}")
         
         return excel_file, ppt_file
