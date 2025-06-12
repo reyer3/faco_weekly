@@ -1,9 +1,9 @@
 """
-FACO WEEKLY - Sistema de Reportes Automatizados (VERSIÓN CORREGIDA)
-===================================================================
+FACO WEEKLY - Sistema de Reportes Automatizados (VERSIÓN EXTENDIDA)
+====================================================================
 
-Versión corregida con lógica de vigencias del calendario_v2.
-Las gestiones se filtran por vigencias específicas de cada campaña.
+Sistema completo con generación automática de reportes Excel y PowerPoint
+integrando análisis de gestión de cobranza con vigencias corregidas.
 """
 
 from fastapi import FastAPI, HTTPException, Response
@@ -20,15 +20,21 @@ from pptx.util import Inches, Pt
 import logging
 from typing import Optional, Dict, List
 import re
+import asyncio
+import io
+from contextlib import asynccontextmanager
+
+# Importar el generador de reportes
+from report_generator import TelefonicaReportGenerator
 
 # Configuración
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="FACO Weekly - Con Vigencias Correctas",
-    description="Sistema con lógica corregida de vigencias por calendario_v2",
-    version="2.1.0"
+    title="FACO Weekly - Sistema Completo con Reportes",
+    description="Sistema con vigencias corregidas + generación automática Excel/PPT",
+    version="2.2.0"
 )
 
 class CorrectedBigQueryManager:
@@ -108,7 +114,7 @@ class CorrectedBigQueryManager:
                 ELSE 'Otro'
             END as tipo_cartera
           FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2`
-          WHERE archivo IN ({','.join([f"'{row['archivo']}'" for _, row in calendario_df.iterrows()])})
+          WHERE archivo IN ({','.join([f"'{row['archivo']}'\" for _, row in calendario_df.iterrows()])})
         ),
         
         -- 2. Asignaciones con sus vigencias correspondientes
@@ -127,7 +133,7 @@ class CorrectedBigQueryManager:
                 ELSE 'Fijo'
             END as servicio
           FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion` a
-          JOIN vigencias_campanias v ON REGEXP_REPLACE(a.archivo, r'\.txt$', '') = v.archivo
+          JOIN vigencias_campanias v ON REGEXP_REPLACE(a.archivo, r'\\.txt$', '') = v.archivo
           WHERE a.creado_el >= '2025-06-11'
             AND a.motivo_rechazo IS NULL
         ),
@@ -300,7 +306,7 @@ class CorrectedBigQueryManager:
                    END as tipo_cartera
             FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2`
             WHERE archivo IN ('{archivos_str}')
-          ) c ON REGEXP_REPLACE(a.archivo, r'\.txt$', '') = c.archivo
+          ) c ON REGEXP_REPLACE(a.archivo, r'\\.txt$', '') = c.archivo
           WHERE a.creado_el >= '2025-06-11'
             AND a.motivo_rechazo IS NULL
         )
@@ -468,17 +474,19 @@ vigencia_processor = VigenciaBusinessProcessor()
 @app.get("/")
 async def root():
     return {
-        "message": "FACO Weekly - Con Vigencias Corregidas",
-        "version": "2.1.0",
-        "fix": "Gestiones filtradas por vigencias específicas del calendario_v2",
-        "logic": [
-            "Cada campaña tiene su propia vigencia (fecha_asignacion → fecha_cierre)",
-            "Gestiones se filtran por vigencia específica de cada campaña",
-            "cod_luna debe estar asignado en esa campaña específica",
-            "No se usan rangos globales de fechas"
+        "message": "FACO Weekly - Sistema Completo con Reportes Automatizados",
+        "version": "2.2.0",
+        "features": [
+            "Gestiones filtradas por vigencias específicas del calendario_v2",
+            "Generación automática de reportes Excel y PowerPoint",
+            "Análisis consolidado por canales CALL y VOICEBOT",
+            "KPIs y métricas ejecutivas automatizadas"
         ],
         "endpoints": {
             "/process-by-vigencias": "Procesamiento respetando vigencias del calendario",
+            "/generate-reports": "🆕 Generar reportes Excel y PowerPoint automáticamente",
+            "/download-excel/{filename}": "🆕 Descargar archivo Excel generado",
+            "/download-powerpoint/{filename}": "🆕 Descargar archivo PowerPoint generado",
             "/validate-vigencias": "Validar lógica de vigencias",
             "/vigencias-status": "Estado de vigencias activas",
             "/health": "Estado del sistema"
@@ -580,7 +588,7 @@ async def process_by_vigencias(
         
         return {
             "status": "success",
-            "version": "2.1.0",
+            "version": "2.2.0",
             "vigencias_procesadas": len(calendario_df),
             "configuracion": {
                 "incluir_cerradas": incluir_cerradas,
@@ -601,6 +609,204 @@ async def process_by_vigencias(
     except Exception as e:
         logger.error(f"Error en procesamiento por vigencias: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en procesamiento por vigencias: {str(e)}")
+
+@app.post("/generate-reports")
+async def generate_reports(
+    fecha_inicio: str,
+    fecha_fin: str,
+    incluir_cerradas: bool = False,
+    formato: str = "ambos"  # "excel", "powerpoint", "ambos"
+):
+    """
+    🆕 NUEVO: Generar reportes automatizados Excel y/o PowerPoint
+    
+    Args:
+        fecha_inicio: Fecha inicio período (YYYY-MM-DD)
+        fecha_fin: Fecha fin período (YYYY-MM-DD)
+        incluir_cerradas: Incluir campañas cerradas
+        formato: Tipo de reporte ("excel", "powerpoint", "ambos")
+    
+    Returns:
+        Información de archivos generados y enlaces de descarga
+    """
+    try:
+        logger.info(f"🚀 Iniciando generación de reportes: {fecha_inicio} a {fecha_fin}")
+        
+        # 1. Validar formato
+        if formato not in ["excel", "powerpoint", "ambos"]:
+            raise HTTPException(status_code=400, detail="Formato debe ser: excel, powerpoint o ambos")
+        
+        # 2. Obtener datos usando el sistema existente
+        calendario_df = bq_manager.get_control_calendar_with_vigencias(fecha_fin)
+        
+        if calendario_df.empty:
+            raise HTTPException(status_code=404, detail="No hay campañas en calendario para el período")
+        
+        # Filtrar por vigencias si necesario
+        if not incluir_cerradas:
+            calendario_df = calendario_df[calendario_df['estado_vigencia'] == 'ACTIVA']
+        
+        # 3. Extraer datos para reportes
+        gestiones_df = bq_manager.get_unified_gestiones_by_vigencias(calendario_df)
+        asignacion_df = bq_manager.get_asignacion_summary_by_vigencias(calendario_df)
+        pagos_df = bq_manager.get_pagos_by_vigencias(calendario_df)
+        
+        # 4. Calcular KPIs por campaña
+        kpis_por_campania = []
+        if not gestiones_df.empty:
+            for archivo in calendario_df['archivo'].unique():
+                gestiones_camp = gestiones_df[gestiones_df['archivo'] == archivo]
+                if not gestiones_camp.empty:
+                    kpi = {
+                        'archivo': archivo,
+                        'total_gestiones': len(gestiones_camp),
+                        'clientes_gestionados': gestiones_camp['cod_luna'].nunique(),
+                        'contactos_efectivos': len(gestiones_camp[gestiones_camp['contactabilidad'] == 'CONTACTO_EFECTIVO']),
+                        'pdps': len(gestiones_camp[gestiones_camp['es_pdp'] == 'SI']),
+                        'monto_compromisos': gestiones_camp['monto_compromiso'].sum()
+                    }
+                    kpi['tasa_contactabilidad'] = round(kpi['contactos_efectivos'] / kpi['total_gestiones'] * 100, 2)
+                    kpi['tasa_pdp'] = round(kpi['pdps'] / kpi['contactos_efectivos'] * 100, 2) if kpi['contactos_efectivos'] > 0 else 0
+                    kpis_por_campania.append(kpi)
+        
+        # 5. Inicializar generador de reportes
+        report_generator = TelefonicaReportGenerator(fecha_inicio, fecha_fin)
+        
+        # 6. Cargar datos al generador
+        report_generator.load_data_from_processing(
+            gestiones_df=gestiones_df,
+            calendario_df=calendario_df,
+            asignacion_df=asignacion_df,
+            pagos_df=pagos_df,
+            kpis_campania=kpis_por_campania
+        )
+        
+        # 7. Crear directorio temporal para archivos
+        temp_dir = tempfile.mkdtemp()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        archivos_generados = {}
+        
+        # 8. Generar archivos según formato solicitado
+        if formato in ["excel", "ambos"]:
+            excel_path = os.path.join(temp_dir, f"Informe_Semanal_Telefonica_{timestamp}.xlsx")
+            excel_file = report_generator.generate_excel_report(excel_path)
+            archivos_generados['excel'] = {
+                'filename': os.path.basename(excel_file),
+                'path': excel_file,
+                'size_mb': round(os.path.getsize(excel_file) / 1024 / 1024, 2)
+            }
+            logger.info(f"✅ Excel generado: {archivos_generados['excel']['filename']}")
+        
+        if formato in ["powerpoint", "ambos"]:
+            ppt_path = os.path.join(temp_dir, f"Presentacion_Semanal_Telefonica_{timestamp}.pptx")
+            ppt_file = report_generator.generate_powerpoint_report(ppt_path)
+            archivos_generados['powerpoint'] = {
+                'filename': os.path.basename(ppt_file),
+                'path': ppt_file,
+                'size_mb': round(os.path.getsize(ppt_file) / 1024 / 1024, 2)
+            }
+            logger.info(f"✅ PowerPoint generado: {archivos_generados['powerpoint']['filename']}")
+        
+        # 9. Preparar respuesta con información de archivos
+        response_data = {
+            "status": "success",
+            "message": "Reportes generados exitosamente",
+            "periodo": f"{fecha_inicio} a {fecha_fin}",
+            "timestamp": timestamp,
+            "formato_solicitado": formato,
+            "datos_procesados": {
+                "campañas": len(calendario_df),
+                "gestiones": len(gestiones_df),
+                "pagos": len(pagos_df),
+                "kpis_campania": len(kpis_por_campania)
+            },
+            "archivos_generados": archivos_generados,
+            "enlaces_descarga": {}
+        }
+        
+        # 10. Crear enlaces de descarga
+        if "excel" in archivos_generados:
+            response_data["enlaces_descarga"]["excel"] = f"/download-excel/{archivos_generados['excel']['filename']}"
+        
+        if "powerpoint" in archivos_generados:
+            response_data["enlaces_descarga"]["powerpoint"] = f"/download-powerpoint/{archivos_generados['powerpoint']['filename']}"
+        
+        # 11. Agregar resumen ejecutivo para referencia
+        resumen_ejecutivo = report_generator.data['resumen_ejecutivo']
+        response_data["resumen_ejecutivo"] = {
+            "total_gestiones": resumen_ejecutivo.get('total_gestiones', 0),
+            "contactos_efectivos": resumen_ejecutivo.get('total_contactos_efectivos', 0),
+            "tasa_contactabilidad": resumen_ejecutivo.get('tasa_contactabilidad_global', 0),
+            "compromisos": resumen_ejecutivo.get('total_compromisos', 0),
+            "monto_compromisos": resumen_ejecutivo.get('monto_compromisos_call', 0)
+        }
+        
+        logger.info(f"🎉 Reportes generados exitosamente en: {temp_dir}")
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"❌ Error generando reportes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando reportes: {str(e)}")
+
+@app.get("/download-excel/{filename}")
+async def download_excel(filename: str):
+    """🆕 Descargar archivo Excel generado"""
+    try:
+        # Buscar archivo en directorio temporal
+        temp_dir = tempfile.gettempdir()
+        
+        # Buscar el archivo en subdirectorios temporales
+        file_path = None
+        for root, dirs, files in os.walk(temp_dir):
+            if filename in files:
+                file_path = os.path.join(root, filename)
+                break
+        
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"Archivo Excel no encontrado: {filename}")
+        
+        logger.info(f"📊 Descargando Excel: {filename}")
+        
+        return FileResponse(
+            path=file_path,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            filename=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Error descargando Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error descargando archivo: {str(e)}")
+
+@app.get("/download-powerpoint/{filename}")
+async def download_powerpoint(filename: str):
+    """🆕 Descargar archivo PowerPoint generado"""
+    try:
+        # Buscar archivo en directorio temporal
+        temp_dir = tempfile.gettempdir()
+        
+        # Buscar el archivo en subdirectorios temporales
+        file_path = None
+        for root, dirs, files in os.walk(temp_dir):
+            if filename in files:
+                file_path = os.path.join(root, filename)
+                break
+        
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"Archivo PowerPoint no encontrado: {filename}")
+        
+        logger.info(f"📈 Descargando PowerPoint: {filename}")
+        
+        return FileResponse(
+            path=file_path,
+            media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            filename=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Error descargando PowerPoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error descargando archivo: {str(e)}")
 
 @app.post("/validate-vigencias")
 async def validate_vigencias_logic():
@@ -640,7 +846,13 @@ async def health_check():
             "status": "healthy", 
             "bigquery": "connected",
             "calendario_vigencias": len(calendario_df),
-            "fix_version": "2.1.0 - Vigencias corregidas"
+            "version": "2.2.0 - Sistema completo con reportes",
+            "features": [
+                "Vigencias corregidas",
+                "Generación Excel automática",
+                "Generación PowerPoint automática", 
+                "Descarga de archivos"
+            ]
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
