@@ -1,9 +1,9 @@
 """
-FACO WEEKLY - Sistema de Reportes Automatizados (VERSIÓN AVANZADA)
-==================================================================
+FACO WEEKLY - Sistema de Reportes Automatizados (VERSIÓN CORREGIDA)
+===================================================================
 
-Versión actualizada con lógica completa de homologación y gestiones unificadas.
-Incluye tablas de homologación para tipificaciones y usuarios.
+Versión corregida con lógica de vigencias del calendario_v2.
+Las gestiones se filtran por vigencias específicas de cada campaña.
 """
 
 from fastapi import FastAPI, HTTPException, Response
@@ -26,23 +26,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="FACO Weekly - Reportes Telefónica (Avanzado)",
-    description="Sistema automatizado con lógica completa de homologación",
-    version="2.0.0"
+    title="FACO Weekly - Con Vigencias Correctas",
+    description="Sistema con lógica corregida de vigencias por calendario_v2",
+    version="2.1.0"
 )
 
-class AdvancedBigQueryManager:
-    """Gestor avanzado con lógica de homologación completa"""
+class CorrectedBigQueryManager:
+    """Gestor corregido con lógica de vigencias del calendario"""
     
     def __init__(self):
         self.client = bigquery.Client(project="mibot-222814")
         self.dataset = "BI_USA"
     
-    def get_control_calendar(self, fecha_inicio: str = None) -> pd.DataFrame:
-        """Extrae tabla de control calendario_v2"""
-        where_clause = ""
-        if fecha_inicio:
-            where_clause = f"WHERE fecha_asignacion >= '{fecha_inicio}'"
+    def get_control_calendar_with_vigencias(self, fecha_corte: str = None) -> pd.DataFrame:
+        """Extrae calendario con vigencias activas"""
+        where_clause = "WHERE 1=1"
+        if fecha_corte:
+            where_clause += f" AND fecha_asignacion <= '{fecha_corte}'"
             
         query = f"""
         SELECT 
@@ -57,32 +57,91 @@ class AdvancedBigQueryManager:
                 WHEN archivo LIKE '%_Temprana_%' THEN 'Temprana'
                 WHEN archivo LIKE '%_CF_ANN_%' THEN 'Fraccionamiento'
                 ELSE 'Otro'
-            END as tipo_cartera
+            END as tipo_cartera,
+            -- Calcular días de vigencia
+            DATE_DIFF(fecha_cierre, fecha_asignacion, DAY) as dias_vigencia,
+            -- Estado de vigencia
+            CASE 
+                WHEN fecha_cierre >= CURRENT_DATE() THEN 'ACTIVA'
+                ELSE 'CERRADA'
+            END as estado_vigencia
         FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2`
         {where_clause}
         ORDER BY fecha_asignacion DESC
         """
         return self.client.query(query).to_dataframe()
     
-    def get_unified_gestiones(self, fecha_inicio: str, fecha_fin: str) -> pd.DataFrame:
+    def get_unified_gestiones_by_vigencias(self, calendario_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Extrae gestiones unificadas con homologación completa
-        Basado en la lógica avanzada proporcionada
+        Extrae gestiones unificadas respetando vigencias del calendario
+        CORREGIDO: Usa vigencias específicas por campaña
         """
+        if calendario_df.empty:
+            return pd.DataFrame()
+        
+        # Construir condiciones de vigencia por archivo
+        vigencia_conditions = []
+        for _, campaign in calendario_df.iterrows():
+            archivo_base = campaign['archivo'].replace('.txt', '')  # Remover .txt si existe
+            fecha_inicio = campaign['fecha_asignacion'].strftime('%Y-%m-%d')
+            fecha_fin = campaign['fecha_cierre'].strftime('%Y-%m-%d')
+            
+            vigencia_conditions.append(f"""
+            (a.archivo = '{archivo_base}' AND DATE(g.date) BETWEEN '{fecha_inicio}' AND '{fecha_fin}')
+            """)
+        
+        # Unir todas las condiciones con OR
+        vigencias_where = " OR ".join(vigencia_conditions)
+        
         query = f"""
         WITH
-        -- 1. Unificar las gestiones de ambos canales, ahora incluyendo el DNI del ejecutivo
+        -- 1. Definir vigencias de campañas
+        vigencias_campanias AS (
+          SELECT 
+            archivo,
+            fecha_asignacion,
+            fecha_cierre,
+            CASE 
+                WHEN archivo LIKE '%_AN_%' THEN 'Altas_Nuevas'
+                WHEN archivo LIKE '%_Temprana_%' THEN 'Temprana'
+                WHEN archivo LIKE '%_CF_ANN_%' THEN 'Fraccionamiento'
+                ELSE 'Otro'
+            END as tipo_cartera
+          FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2`
+          WHERE archivo IN ({','.join([f"'{row['archivo']}'" for _, row in calendario_df.iterrows()])})
+        ),
+        
+        -- 2. Asignaciones con sus vigencias correspondientes
+        asignaciones_con_vigencia AS (
+          SELECT 
+            a.cod_luna,
+            a.cuenta,
+            a.negocio,
+            a.archivo,
+            v.fecha_asignacion,
+            v.fecha_cierre,
+            v.tipo_cartera,
+            -- Servicio normalizado: solo MOVIL es móvil
+            CASE 
+                WHEN UPPER(a.negocio) = 'MOVIL' THEN 'Movil'
+                ELSE 'Fijo'
+            END as servicio
+          FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion` a
+          JOIN vigencias_campanias v ON REGEXP_REPLACE(a.archivo, r'\.txt$', '') = v.archivo
+          WHERE a.creado_el >= '2025-06-11'
+            AND a.motivo_rechazo IS NULL
+        ),
+        
+        -- 3. Unificar gestiones (CALL + VOICEBOT)
         gestiones_unificadas AS (
-          -- Lógica de gestiones_call
+          -- Gestiones CALL
           SELECT
             mba.date,
             SAFE_CAST(mba.document AS INT64) AS cod_luna,
             'CALL' AS canal,
             COALESCE(u.nombre_apellidos, 'AGENTE NO IDENTIFICADO') AS ejecutivo_homologado,
             COALESCE(mba.nombre_agente, 'DISCADOR') AS ejecutivo,
-            -- DNI del agente humano
             SAFE_CAST(u.dni AS STRING) AS dni_ejecutivo,
-            -- Campos para la lógica de JOIN de homologación
             mba.n1,
             mba.n2,
             mba.n3,
@@ -93,38 +152,49 @@ class AdvancedBigQueryManager:
           FROM `{self.dataset}.mibotair_P3fV4dWNeMkN5RJMhV8e` mba
           LEFT JOIN `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_usuarios` u
             ON mba.correo_agente = u.usuario
-          WHERE DATE(mba.date) BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
 
           UNION ALL
 
-          -- Lógica de gestiones_bot
+          -- Gestiones VOICEBOT
           SELECT
             vb.date,
             SAFE_CAST(vb.document AS INT64) AS cod_luna,
             'VOICEBOT' AS canal,
             'VOICEBOT' AS ejecutivo_homologado,
             'VOICEBOT' AS ejecutivo,
-            -- >>> DNI FICTICIO PARA EL BOT <<<
             '99999999' AS dni_ejecutivo,
-            -- Campos para la lógica de JOIN de homologación
             vb.management, NULL, NULL, NULL,
             vb.management AS bot_management,
             vb.compromiso AS bot_compromiso,
             NULL AS duracion
           FROM `{self.dataset}.voicebot_P3fV4dWNeMkN5RJMhV8e` vb
-          WHERE DATE(vb.date) BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
+        ),
+        
+        -- 4. Filtrar gestiones por vigencias específicas de cada campaña
+        gestiones_en_vigencia AS (
+          SELECT 
+            g.*,
+            av.archivo,
+            av.fecha_asignacion,
+            av.fecha_cierre,
+            av.tipo_cartera,
+            av.servicio,
+            -- Días desde asignación
+            DATE_DIFF(DATE(g.date), av.fecha_asignacion, DAY) as dias_desde_asignacion
+          FROM gestiones_unificadas g
+          JOIN asignaciones_con_vigencia av ON g.cod_luna = av.cod_luna
+          WHERE DATE(g.date) BETWEEN av.fecha_asignacion AND av.fecha_cierre
         ),
 
-        -- 2. Homologar las gestiones unificadas
+        -- 5. Homologar las gestiones en vigencia
         gestiones_homologadas AS (
           SELECT
             g.*,
             CASE
               WHEN g.canal = 'CALL' THEN COALESCE(SAFE_CAST(h_call.peso AS INT64), 0)
               WHEN g.canal = 'VOICEBOT' THEN COALESCE(SAFE_CAST(h_bot.peso_homologado AS INT64), 0)
-              ELSE 0 -- Valor por defecto si el canal no es reconocido
+              ELSE 0
             END AS peso,
-            -- Lógica de homologación unificada con valores corregidos
             CASE
               WHEN g.canal = 'CALL' THEN COALESCE(h_call.contactabilidad, 'NO_HOMOLOGADO')
               WHEN g.canal = 'VOICEBOT' THEN COALESCE(h_bot.contactabilidad_homologada, 'NO_HOMOLOGADO')
@@ -133,7 +203,6 @@ class AdvancedBigQueryManager:
               WHEN g.canal = 'CALL' THEN COALESCE(h_call.pdp, 'NO')
               WHEN g.canal = 'VOICEBOT' THEN COALESCE(IF(h_bot.es_pdp_homologado = 1, 'SI', 'NO'), 'NO')
             END AS es_pdp,
-            -- Traemos los n1,n2,n3 homologados del bot para estandarizar
             CASE
                 WHEN g.canal = 'VOICEBOT' THEN h_bot.n1_homologado
                 ELSE g.n1
@@ -146,12 +215,11 @@ class AdvancedBigQueryManager:
                 WHEN g.canal = 'VOICEBOT' THEN h_bot.n3_homologado
                 ELSE g.n3
             END AS n3_final,
-            -- Estandarizamos el campo 'compromiso'
             CASE
                 WHEN g.canal = 'CALL' THEN g.sub_management
                 ELSE g.bot_compromiso
             END AS compromiso
-          FROM gestiones_unificadas g
+          FROM gestiones_en_vigencia g
           LEFT JOIN `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2` h_call
             ON g.canal = 'CALL' AND g.n1 = h_call.n_1 AND g.n2 = h_call.n_2 AND g.n3 = h_call.n_3
           LEFT JOIN `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot` h_bot
@@ -160,9 +228,8 @@ class AdvancedBigQueryManager:
             AND COALESCE(g.bot_compromiso, '') = h_bot.bot_compromiso
         )
 
-        -- 3. Unir con la asignación para obtener el monto exigible
+        -- 6. Resultado final con monto de compromiso
         SELECT
-          -- Dimensiones y hechos base de la gestión
           h.date,
           h.cod_luna,
           h.canal,
@@ -170,67 +237,100 @@ class AdvancedBigQueryManager:
           h.ejecutivo_homologado,
           h.dni_ejecutivo,
           h.duracion,
-          -- Detalle de tipificación final
           h.n1_final AS n1,
           h.n2_final AS n2,
           h.n3_final AS n3,
           h.compromiso,
-          -- Homologación final
           h.contactabilidad,
           h.es_pdp,
-          -- Lógica del monto de compromiso
           h.peso,
+          h.archivo,
+          h.fecha_asignacion,
+          h.fecha_cierre,
+          h.tipo_cartera,
+          h.servicio,
+          h.dias_desde_asignacion,
+          -- Lógica de monto de compromiso desde fact_asignacion
           CASE
-            WHEN h.es_pdp = 'SI' THEN COALESCE(a.monto_exigible, 0)
+            WHEN h.es_pdp = 'SI' THEN COALESCE(fa.monto_exigible, 0)
             ELSE 0
           END AS monto_compromiso,
-          -- Campos adicionales de asignación
-          a.monto_exigible,
-          a.servicio,
-          a.tipo_cartera
+          fa.monto_exigible
         FROM gestiones_homologadas h
-        LEFT JOIN `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_fact_asignacion` a
-          ON h.cod_luna = a.cod_luna
-        WHERE h.contactabilidad != 'NO_HOMOLOGADO'  -- Excluir no homologados
-        ORDER BY h.date DESC
+        LEFT JOIN `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_fact_asignacion` fa
+          ON h.cod_luna = fa.cod_luna
+        WHERE h.contactabilidad != 'NO_HOMOLOGADO'
+        ORDER BY h.date DESC, h.archivo, h.cod_luna
         """
         
-        logger.info(f"Ejecutando query de gestiones unificadas para período {fecha_inicio} a {fecha_fin}")
+        logger.info(f"Ejecutando query con vigencias para {len(calendario_df)} campañas")
         result = self.client.query(query).to_dataframe()
-        logger.info(f"Gestiones unificadas extraídas: {len(result)}")
+        logger.info(f"Gestiones en vigencia extraídas: {len(result)}")
         
         return result
     
-    def get_asignacion_fact(self, archivos_control: List[str] = None) -> pd.DataFrame:
-        """Extrae fact_asignacion con filtros de calendario"""
-        where_clause = "WHERE 1=1"
+    def get_asignacion_summary_by_vigencias(self, calendario_df: pd.DataFrame) -> pd.DataFrame:
+        """Resumen de asignaciones por vigencias"""
+        if calendario_df.empty:
+            return pd.DataFrame()
         
-        if archivos_control:
-            archivos_str = "', '".join(archivos_control)
-            where_clause += f" AND archivo IN ('{archivos_str}')"
+        archivos = [row['archivo'] for _, row in calendario_df.iterrows()]
+        archivos_str = "', '".join(archivos)
         
         query = f"""
-        SELECT 
-            cod_luna,
-            monto_exigible,
-            servicio,
-            tipo_cartera,
-            archivo,
-            fecha_asignacion,
-            -- Calcular servicios según regla: solo MOVIL es móvil
+        WITH asignaciones_vigentes AS (
+          SELECT 
+            a.*,
+            c.fecha_asignacion,
+            c.fecha_cierre,
+            c.tipo_cartera,
+            DATE_DIFF(c.fecha_cierre, c.fecha_asignacion, DAY) as dias_vigencia,
             CASE 
-                WHEN UPPER(servicio) = 'MOVIL' THEN 'Movil'
+                WHEN UPPER(a.negocio) = 'MOVIL' THEN 'Movil'
                 ELSE 'Fijo'
             END as servicio_normalizado
-        FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_fact_asignacion`
-        {where_clause}
-        ORDER BY fecha_asignacion DESC
+          FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion` a
+          JOIN (
+            SELECT archivo, fecha_asignacion, fecha_cierre,
+                   CASE 
+                     WHEN archivo LIKE '%_AN_%' THEN 'Altas_Nuevas'
+                     WHEN archivo LIKE '%_Temprana_%' THEN 'Temprana'
+                     WHEN archivo LIKE '%_CF_ANN_%' THEN 'Fraccionamiento'
+                     ELSE 'Otro'
+                   END as tipo_cartera
+            FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_calendario_v2`
+            WHERE archivo IN ('{archivos_str}')
+          ) c ON REGEXP_REPLACE(a.archivo, r'\.txt$', '') = c.archivo
+          WHERE a.creado_el >= '2025-06-11'
+            AND a.motivo_rechazo IS NULL
+        )
+        
+        SELECT 
+          archivo,
+          fecha_asignacion,
+          fecha_cierre,
+          tipo_cartera,
+          servicio_normalizado,
+          dias_vigencia,
+          COUNT(DISTINCT cod_luna) as clientes_asignados,
+          COUNT(DISTINCT cuenta) as cuentas_asignadas,
+          COUNT(*) as registros_totales
+        FROM asignaciones_vigentes
+        GROUP BY 1,2,3,4,5,6
+        ORDER BY fecha_asignacion DESC, tipo_cartera
         """
         
         return self.client.query(query).to_dataframe()
     
-    def get_pagos_periodo(self, fecha_inicio: str, fecha_fin: str) -> pd.DataFrame:
-        """Extrae pagos del período"""
+    def get_pagos_by_vigencias(self, calendario_df: pd.DataFrame) -> pd.DataFrame:
+        """Extrae pagos considerando las vigencias extendidas"""
+        if calendario_df.empty:
+            return pd.DataFrame()
+        
+        # Extender vigencias para capturar pagos post-gestión
+        fecha_min = calendario_df['fecha_asignacion'].min().strftime('%Y-%m-%d')
+        fecha_max = (calendario_df['fecha_cierre'].max() + timedelta(days=30)).strftime('%Y-%m-%d')
+        
         query = f"""
         SELECT 
             cod_sistema,
@@ -239,362 +339,308 @@ class AdvancedBigQueryManager:
             fecha_pago,
             archivo
         FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
-        WHERE fecha_pago BETWEEN '{fecha_inicio}' AND '{fecha_fin}'
+        WHERE fecha_pago BETWEEN '{fecha_min}' AND '{fecha_max}'
             AND motivo_rechazo IS NULL
             AND monto_cancelado > 0
         """
         return self.client.query(query).to_dataframe()
-    
-    def get_homologation_status(self) -> Dict:
-        """Verifica estado de las homologaciones"""
-        queries = {
-            'usuarios': f"SELECT COUNT(*) as total FROM `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_usuarios`",
-            'call_homolog': f"SELECT COUNT(*) as total FROM `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2`",
-            'bot_homolog': f"SELECT COUNT(*) as total FROM `{self.dataset}.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot`",
-            'fact_asignacion': f"SELECT COUNT(*) as total FROM `{self.dataset}.dash_P3fV4dWNeMkN5RJMhV8e_fact_asignacion`"
-        }
-        
-        status = {}
-        for name, query in queries.items():
-            try:
-                result = self.client.query(query).to_dataframe()
-                status[name] = int(result.iloc[0]['total'])
-            except Exception as e:
-                status[name] = f"Error: {str(e)}"
-        
-        return status
 
-class AdvancedBusinessProcessor:
-    """Procesador de lógica de negocio avanzada"""
+class VigenciaBusinessProcessor:
+    """Procesador que respeta vigencias del calendario"""
     
     def __init__(self):
         pass
     
-    def analyze_contactability_distribution(self, gestiones_df: pd.DataFrame) -> Dict:
-        """Analiza distribución de contactabilidad homologada"""
-        if gestiones_df.empty:
+    def analyze_vigencias_coverage(self, calendario_df: pd.DataFrame, gestiones_df: pd.DataFrame) -> Dict:
+        """Analiza cobertura de gestiones por vigencias"""
+        if calendario_df.empty or gestiones_df.empty:
             return {}
         
-        # Distribución por contactabilidad
-        contactability_dist = gestiones_df['contactabilidad'].value_counts().to_dict()
+        coverage_by_campaign = []
         
-        # Distribución por canal
-        canal_dist = gestiones_df.groupby(['canal', 'contactabilidad']).size().unstack(fill_value=0)
-        
-        # PDP por canal
-        pdp_dist = gestiones_df.groupby(['canal', 'es_pdp']).size().unstack(fill_value=0)
-        
-        # Ejecutivos con más gestiones
-        top_ejecutivos = gestiones_df.groupby(['ejecutivo_homologado', 'canal']).agg({
-            'cod_luna': 'count',
-            'monto_compromiso': 'sum',
-            'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum()
-        }).reset_index()
-        
-        top_ejecutivos.columns = ['ejecutivo', 'canal', 'total_gestiones', 'monto_compromiso', 'contactos_efectivos']
-        top_ejecutivos['tasa_efectividad'] = (
-            top_ejecutivos['contactos_efectivos'] / top_ejecutivos['total_gestiones'] * 100
-        ).round(2)
+        for _, campaign in calendario_df.iterrows():
+            archivo = campaign['archivo']
+            fecha_inicio = campaign['fecha_asignacion']
+            fecha_fin = campaign['fecha_cierre']
+            
+            # Gestiones en esta campaña específica
+            gestiones_campaign = gestiones_df[gestiones_df['archivo'] == archivo]
+            
+            # Análisis temporal de gestiones
+            if not gestiones_campaign.empty:
+                gestiones_por_dia = gestiones_campaign.groupby(
+                    gestiones_campaign['date'].dt.date
+                ).size()
+                
+                cobertura = {
+                    'archivo': archivo,
+                    'tipo_cartera': campaign['tipo_cartera'],
+                    'fecha_asignacion': fecha_inicio,
+                    'fecha_cierre': fecha_fin,
+                    'dias_vigencia': (fecha_fin - fecha_inicio).days,
+                    'total_gestiones': len(gestiones_campaign),
+                    'clientes_gestionados': gestiones_campaign['cod_luna'].nunique(),
+                    'dias_con_gestion': len(gestiones_por_dia),
+                    'gestion_promedio_por_dia': gestiones_por_dia.mean(),
+                    'primer_gestion': gestiones_campaign['date'].min().date(),
+                    'ultima_gestion': gestiones_campaign['date'].max().date()
+                }
+                
+                # Calcular distribución temporal
+                cobertura['cobertura_temporal'] = len(gestiones_por_dia) / max((fecha_fin - fecha_inicio).days, 1) * 100
+                
+            else:
+                cobertura = {
+                    'archivo': archivo,
+                    'tipo_cartera': campaign['tipo_cartera'],
+                    'fecha_asignacion': fecha_inicio,
+                    'fecha_cierre': fecha_fin,
+                    'dias_vigencia': (fecha_fin - fecha_inicio).days,
+                    'total_gestiones': 0,
+                    'clientes_gestionados': 0,
+                    'dias_con_gestion': 0,
+                    'gestion_promedio_por_dia': 0,
+                    'primer_gestion': None,
+                    'ultima_gestion': None,
+                    'cobertura_temporal': 0
+                }
+            
+            coverage_by_campaign.append(cobertura)
         
         return {
-            'contactabilidad_distribucion': contactability_dist,
-            'canal_contactabilidad': canal_dist.to_dict() if not canal_dist.empty else {},
-            'pdp_distribucion': pdp_dist.to_dict() if not pdp_dist.empty else {},
-            'top_ejecutivos': top_ejecutivos.sort_values('monto_compromiso', ascending=False).head(10).to_dict('records')
+            'cobertura_por_campania': coverage_by_campaign,
+            'resumen': {
+                'campañas_analizadas': len(coverage_by_campaign),
+                'campañas_con_gestion': len([c for c in coverage_by_campaign if c['total_gestiones'] > 0]),
+                'cobertura_temporal_promedio': round(
+                    sum(c['cobertura_temporal'] for c in coverage_by_campaign) / len(coverage_by_campaign), 2
+                )
+            }
         }
     
-    def calculate_advanced_kpis(self, gestiones_df: pd.DataFrame, asignacion_df: pd.DataFrame) -> Dict:
-        """Calcula KPIs avanzados con la nueva lógica"""
+    def validate_vigencias_logic(self, calendario_df: pd.DataFrame, gestiones_df: pd.DataFrame) -> Dict:
+        """Valida que la lógica de vigencias esté funcionando correctamente"""
+        validation = {
+            'total_campañas': len(calendario_df),
+            'gestiones_fuera_vigencia': 0,
+            'gestiones_sin_campania': 0,
+            'problems': []
+        }
+        
         if gestiones_df.empty:
-            return {}
+            validation['problems'].append("No hay gestiones para validar")
+            return validation
         
-        # KPIs base
-        total_gestiones = len(gestiones_df)
-        contactos_efectivos = len(gestiones_df[gestiones_df['contactabilidad'] == 'CONTACTO_EFECTIVO'])
-        pdps_totales = len(gestiones_df[gestiones_df['es_pdp'] == 'SI'])
-        monto_total_compromisos = gestiones_df['monto_compromiso'].sum()
-        
-        # Clientes únicos gestionados
-        clientes_gestionados = gestiones_df['cod_luna'].nunique()
-        
-        # KPIs por canal
-        kpis_por_canal = gestiones_df.groupby('canal').agg({
-            'cod_luna': ['count', 'nunique'],
-            'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum(),
-            'es_pdp': lambda x: (x == 'SI').sum(),
-            'monto_compromiso': 'sum',
-            'duracion': 'mean'
-        }).round(2)
-        
-        # Universo asignado vs gestionado
-        universo_asignado = asignacion_df['cod_luna'].nunique() if not asignacion_df.empty else 0
-        cobertura_gestion = (clientes_gestionados / universo_asignado * 100) if universo_asignado > 0 else 0
-        
-        return {
-            'kpis_generales': {
-                'total_gestiones': total_gestiones,
-                'clientes_gestionados': clientes_gestionados,
-                'contactos_efectivos': contactos_efectivos,
-                'tasa_contactabilidad_efectiva': round((contactos_efectivos / total_gestiones * 100), 2),
-                'pdps_totales': pdps_totales,
-                'tasa_pdp': round((pdps_totales / contactos_efectivos * 100), 2) if contactos_efectivos > 0 else 0,
-                'monto_total_compromisos': float(monto_total_compromisos),
-                'ticket_promedio_compromiso': round((monto_total_compromisos / pdps_totales), 2) if pdps_totales > 0 else 0,
-                'universo_asignado': universo_asignado,
-                'cobertura_gestion': round(cobertura_gestion, 2)
-            },
-            'kpis_por_canal': kpis_por_canal.to_dict() if not kpis_por_canal.empty else {}
-        }
-    
-    def detect_homologation_issues(self, gestiones_df: pd.DataFrame) -> Dict:
-        """Detecta problemas de homologación"""
-        issues = {
-            'total_gestiones': len(gestiones_df),
-            'no_homologadas': 0,
-            'sin_dni': 0,
-            'ejecutivos_sin_identificar': 0,
-            'peso_cero': 0
-        }
-        
-        if not gestiones_df.empty:
-            issues['no_homologadas'] = len(gestiones_df[gestiones_df['contactabilidad'] == 'NO_HOMOLOGADO'])
-            issues['sin_dni'] = len(gestiones_df[gestiones_df['dni_ejecutivo'].isna()])
-            issues['ejecutivos_sin_identificar'] = len(gestiones_df[gestiones_df['ejecutivo_homologado'] == 'AGENTE NO IDENTIFICADO'])
-            issues['peso_cero'] = len(gestiones_df[gestiones_df['peso'] == 0])
+        # Verificar gestiones fuera de vigencia (no debería haber ninguna)
+        for _, gestion in gestiones_df.iterrows():
+            fecha_gestion = gestion['date'].date() if hasattr(gestion['date'], 'date') else gestion['date']
+            archivo = gestion['archivo']
+            
+            # Buscar la campaña correspondiente
+            campaign = calendario_df[calendario_df['archivo'] == archivo]
+            
+            if campaign.empty:
+                validation['gestiones_sin_campania'] += 1
+                continue
+            
+            fecha_inicio = campaign.iloc[0]['fecha_asignacion']
+            fecha_fin = campaign.iloc[0]['fecha_cierre']
+            
+            if not (fecha_inicio <= fecha_gestion <= fecha_fin):
+                validation['gestiones_fuera_vigencia'] += 1
         
         # Calcular porcentajes
-        total = issues['total_gestiones']
-        if total > 0:
-            for key in ['no_homologadas', 'sin_dni', 'ejecutivos_sin_identificar', 'peso_cero']:
-                issues[f'{key}_pct'] = round((issues[key] / total * 100), 2)
+        total_gestiones = len(gestiones_df)
+        if total_gestiones > 0:
+            validation['pct_fuera_vigencia'] = round(
+                validation['gestiones_fuera_vigencia'] / total_gestiones * 100, 2
+            )
+            validation['pct_sin_campania'] = round(
+                validation['gestiones_sin_campania'] / total_gestiones * 100, 2
+            )
         
-        return issues
+        return validation
 
-class AdvancedKPICalculator:
-    """Calculadora avanzada de KPIs"""
-    
-    def __init__(self, gestiones_df, asignacion_df, pagos_df):
-        self.gestiones = gestiones_df
-        self.asignacion = asignacion_df
-        self.pagos = pagos_df
-    
-    def get_executive_ranking(self, top_n: int = 20, exclude_voicebot: bool = True) -> pd.DataFrame:
-        """Genera ranking de ejecutivos con lógica avanzada"""
-        if self.gestiones.empty:
-            return pd.DataFrame()
-        
-        # Filtrar gestiones
-        gestiones_filtered = self.gestiones.copy()
-        if exclude_voicebot:
-            gestiones_filtered = gestiones_filtered[gestiones_filtered['canal'] != 'VOICEBOT']
-        
-        # Agrupar por ejecutivo
-        ranking = gestiones_filtered.groupby(['ejecutivo_homologado', 'dni_ejecutivo', 'canal']).agg({
-            'cod_luna': ['count', 'nunique'],
-            'contactabilidad': [
-                lambda x: (x == 'CONTACTO_EFECTIVO').sum(),
-                lambda x: (x == 'NO_CONTACTO').sum(),
-                lambda x: (x == 'CONTACTO_NO_EFECTIVO').sum()
-            ],
-            'es_pdp': lambda x: (x == 'SI').sum(),
-            'monto_compromiso': 'sum',
-            'duracion': ['sum', 'mean'],
-            'peso': 'mean'
-        }).reset_index()
-        
-        # Aplanar columnas
-        ranking.columns = [
-            'ejecutivo', 'dni_ejecutivo', 'canal', 'total_gestiones', 'clientes_unicos',
-            'contactos_efectivos', 'no_contactos', 'contactos_no_efectivos',
-            'pdps', 'monto_comprometido', 'duracion_total', 'duracion_promedio', 'peso_promedio'
-        ]
-        
-        # Calcular métricas derivadas
-        ranking['tasa_contactabilidad_efectiva'] = (
-            ranking['contactos_efectivos'] / ranking['total_gestiones'] * 100
-        ).round(2)
-        
-        ranking['tasa_pdp'] = (
-            ranking['pdps'] / ranking['contactos_efectivos'] * 100
-        ).fillna(0).round(2)
-        
-        ranking['intensidad_minutos'] = (ranking['duracion_promedio'] / 60).round(2)
-        
-        ranking['productividad_score'] = (
-            ranking['monto_comprometido'] * 0.4 +
-            ranking['tasa_contactabilidad_efectiva'] * 0.3 +
-            ranking['tasa_pdp'] * 0.2 +
-            ranking['peso_promedio'] * 0.1
-        ).round(2)
-        
-        # Ordenar por productividad
-        ranking = ranking.sort_values([
-            'productividad_score', 'monto_comprometido', 'tasa_contactabilidad_efectiva'
-        ], ascending=[False, False, False])
-        
-        return ranking.head(top_n)
-    
-    def get_campaign_summary(self) -> Dict:
-        """Resumen por campaña/cartera"""
-        if self.asignacion.empty:
-            return {}
-        
-        # Resumen por cartera
-        summary_cartera = self.asignacion.groupby('tipo_cartera').agg({
-            'cod_luna': 'nunique',
-            'monto_exigible': 'sum'
-        }).reset_index()
-        
-        summary_cartera.columns = ['cartera', 'clientes_asignados', 'monto_exigible_total']
-        
-        # Agregar gestiones por cartera si hay join posible
-        if not self.gestiones.empty and 'tipo_cartera' in self.gestiones.columns:
-            gestiones_cartera = self.gestiones.groupby('tipo_cartera').agg({
-                'cod_luna': 'nunique',
-                'contactabilidad': lambda x: (x == 'CONTACTO_EFECTIVO').sum(),
-                'monto_compromiso': 'sum'
-            }).reset_index()
-            
-            gestiones_cartera.columns = ['cartera', 'clientes_gestionados', 'contactos_efectivos', 'monto_comprometido']
-            
-            summary_cartera = summary_cartera.merge(gestiones_cartera, on='cartera', how='left')
-            summary_cartera = summary_cartera.fillna(0)
-            
-            # Calcular tasas
-            summary_cartera['tasa_cobertura'] = (
-                summary_cartera['clientes_gestionados'] / summary_cartera['clientes_asignados'] * 100
-            ).round(2)
-        
-        return summary_cartera.to_dict('records')
-
-# Inicializar managers avanzados
-bq_manager = AdvancedBigQueryManager()
-business_processor = AdvancedBusinessProcessor()
+# Inicializar managers corregidos
+bq_manager = CorrectedBigQueryManager()
+vigencia_processor = VigenciaBusinessProcessor()
 
 @app.get("/")
 async def root():
     return {
-        "message": "FACO Weekly - Sistema Avanzado con Homologación",
-        "version": "2.0.0",
-        "features": [
-            "Gestiones unificadas CALL + VOICEBOT",
-            "Homologación completa de tipificaciones",
-            "DNI de ejecutivos y mapping de usuarios",
-            "Lógica de monto_compromiso basada en PDP",
-            "KPIs avanzados por canal y ejecutivo"
+        "message": "FACO Weekly - Con Vigencias Corregidas",
+        "version": "2.1.0",
+        "fix": "Gestiones filtradas por vigencias específicas del calendario_v2",
+        "logic": [
+            "Cada campaña tiene su propia vigencia (fecha_asignacion → fecha_cierre)",
+            "Gestiones se filtran por vigencia específica de cada campaña",
+            "cod_luna debe estar asignado en esa campaña específica",
+            "No se usan rangos globales de fechas"
         ],
         "endpoints": {
-            "/process-advanced": "Procesamiento con lógica avanzada",
-            "/homologation-status": "Estado de tablas de homologación",
+            "/process-by-vigencias": "Procesamiento respetando vigencias del calendario",
+            "/validate-vigencias": "Validar lógica de vigencias",
+            "/vigencias-status": "Estado de vigencias activas",
             "/health": "Estado del sistema"
         }
     }
 
-@app.get("/homologation-status")
-async def get_homologation_status():
-    """Verifica estado de todas las tablas de homologación"""
+@app.get("/vigencias-status")
+async def get_vigencias_status():
+    """Estado actual de vigencias del calendario"""
     try:
-        status = bq_manager.get_homologation_status()
+        calendario_df = bq_manager.get_control_calendar_with_vigencias()
+        
+        if calendario_df.empty:
+            return {"status": "no_data", "message": "No hay campañas en calendario"}
+        
+        # Análisis de vigencias
+        total_campañas = len(calendario_df)
+        activas = len(calendario_df[calendario_df['estado_vigencia'] == 'ACTIVA'])
+        cerradas = len(calendario_df[calendario_df['estado_vigencia'] == 'CERRADA'])
+        
+        # Distribución por cartera
+        dist_cartera = calendario_df['tipo_cartera'].value_counts().to_dict()
+        
+        # Vigencias más recientes
+        vigencias_recientes = calendario_df.head(10)[
+            ['archivo', 'fecha_asignacion', 'fecha_cierre', 'tipo_cartera', 'dias_vigencia', 'estado_vigencia']
+        ].to_dict('records')
+        
         return {
             "status": "success",
-            "tablas_homologacion": status,
-            "observaciones": {
-                "usuarios": "Mapeo correo → nombre/dni",
-                "call_homolog": "Homologación tipificaciones CALL (n1,n2,n3)",
-                "bot_homolog": "Homologación tipificaciones VOICEBOT",
-                "fact_asignacion": "Tabla fact con monto_exigible"
-            }
+            "resumen": {
+                "total_campañas": total_campañas,
+                "vigencias_activas": activas,
+                "vigencias_cerradas": cerradas,
+                "distribucion_cartera": dist_cartera
+            },
+            "vigencias_recientes": vigencias_recientes
         }
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error verificando homologación: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo vigencias: {str(e)}")
 
-@app.post("/process-advanced")
-async def process_advanced_weekly(
-    fecha_inicio: Optional[str] = None,
-    fecha_fin: Optional[str] = None
+@app.post("/process-by-vigencias")
+async def process_by_vigencias(
+    incluir_cerradas: bool = False,
+    fecha_corte: Optional[str] = None
 ):
     """
-    Procesamiento avanzado con lógica completa de homologación
+    Procesamiento respetando vigencias específicas del calendario_v2
+    CORREGIDO: No usa rangos globales, sino vigencias por campaña
     """
     try:
-        # Configurar fechas
-        if not fecha_fin:
-            fecha_fin = date.today().strftime('%Y-%m-%d')
-        if not fecha_inicio:
-            fecha_inicio = (date.today() - timedelta(days=7)).strftime('%Y-%m-%d')
+        logger.info("Iniciando procesamiento por vigencias específicas")
         
-        logger.info(f"Iniciando procesamiento avanzado: {fecha_inicio} a {fecha_fin}")
+        # 1. Obtener calendario con vigencias
+        calendario_df = bq_manager.get_control_calendar_with_vigencias(fecha_corte)
         
-        # 1. Verificar estado de homologación
-        homolog_status = bq_manager.get_homologation_status()
-        logger.info(f"Estado homologación: {homolog_status}")
+        if calendario_df.empty:
+            raise HTTPException(status_code=404, detail="No hay campañas en calendario")
         
-        # 2. Obtener calendario de control
-        calendar_df = bq_manager.get_control_calendar('2025-06-11')
+        # 2. Filtrar por estado de vigencia si se solicita
+        if not incluir_cerradas:
+            calendario_df = calendario_df[calendario_df['estado_vigencia'] == 'ACTIVA']
         
-        # 3. Extraer gestiones unificadas con homologación
-        gestiones_df = bq_manager.get_unified_gestiones(fecha_inicio, fecha_fin)
-        logger.info(f"Gestiones unificadas extraídas: {len(gestiones_df)}")
+        logger.info(f"Procesando {len(calendario_df)} campañas")
         
-        # 4. Extraer fact_asignacion
-        archivos_control = calendar_df['archivo'].tolist() if not calendar_df.empty else []
-        asignacion_df = bq_manager.get_asignacion_fact(archivos_control)
+        # 3. Extraer gestiones respetando vigencias específicas
+        gestiones_df = bq_manager.get_unified_gestiones_by_vigencias(calendario_df)
         
-        # 5. Extraer pagos
-        pagos_df = bq_manager.get_pagos_periodo(fecha_inicio, fecha_fin)
+        # 4. Obtener resumen de asignaciones por vigencias
+        asignacion_df = bq_manager.get_asignacion_summary_by_vigencias(calendario_df)
         
-        # 6. Análisis de contactabilidad
-        contactability_analysis = business_processor.analyze_contactability_distribution(gestiones_df)
+        # 5. Extraer pagos considerando vigencias extendidas
+        pagos_df = bq_manager.get_pagos_by_vigencias(calendario_df)
         
-        # 7. KPIs avanzados
-        advanced_kpis = business_processor.calculate_advanced_kpis(gestiones_df, asignacion_df)
+        # 6. Análisis de cobertura por vigencias
+        cobertura_analysis = vigencia_processor.analyze_vigencias_coverage(calendario_df, gestiones_df)
         
-        # 8. Detectar problemas de homologación
-        homolog_issues = business_processor.detect_homologation_issues(gestiones_df)
+        # 7. Validar lógica de vigencias
+        validation = vigencia_processor.validate_vigencias_logic(calendario_df, gestiones_df)
         
-        # 9. Ranking de ejecutivos
-        kpi_calc = AdvancedKPICalculator(gestiones_df, asignacion_df, pagos_df)
-        executive_ranking = kpi_calc.get_executive_ranking()
-        campaign_summary = kpi_calc.get_campaign_summary()
+        # 8. KPIs por campaña
+        kpis_por_campania = []
+        if not gestiones_df.empty:
+            for archivo in calendario_df['archivo'].unique():
+                gestiones_camp = gestiones_df[gestiones_df['archivo'] == archivo]
+                if not gestiones_camp.empty:
+                    kpi = {
+                        'archivo': archivo,
+                        'total_gestiones': len(gestiones_camp),
+                        'clientes_gestionados': gestiones_camp['cod_luna'].nunique(),
+                        'contactos_efectivos': len(gestiones_camp[gestiones_camp['contactabilidad'] == 'CONTACTO_EFECTIVO']),
+                        'pdps': len(gestiones_camp[gestiones_camp['es_pdp'] == 'SI']),
+                        'monto_compromisos': gestiones_camp['monto_compromiso'].sum()
+                    }
+                    kpi['tasa_contactabilidad'] = round(kpi['contactos_efectivos'] / kpi['total_gestiones'] * 100, 2)
+                    kpi['tasa_pdp'] = round(kpi['pdps'] / kpi['contactos_efectivos'] * 100, 2) if kpi['contactos_efectivos'] > 0 else 0
+                    kpis_por_campania.append(kpi)
         
         return {
             "status": "success",
-            "version": "2.0.0",
-            "periodo": {"inicio": fecha_inicio, "fin": fecha_fin},
-            "homologacion": {
-                "tablas_disponibles": homolog_status,
-                "problemas_detectados": homolog_issues
+            "version": "2.1.0",
+            "vigencias_procesadas": len(calendario_df),
+            "configuracion": {
+                "incluir_cerradas": incluir_cerradas,
+                "fecha_corte": fecha_corte
             },
             "datos_procesados": {
-                "campañas_calendario": len(calendar_df),
-                "gestiones_unificadas": len(gestiones_df),
-                "asignaciones_fact": len(asignacion_df),
-                "pagos": len(pagos_df)
+                "campañas_calendario": len(calendario_df),
+                "gestiones_en_vigencia": len(gestiones_df),
+                "asignaciones_resumen": len(asignacion_df),
+                "pagos_periodo": len(pagos_df)
             },
-            "analisis_contactabilidad": contactability_analysis,
-            "kpis_avanzados": advanced_kpis,
-            "ranking_ejecutivos": executive_ranking.head(10).to_dict('records') if not executive_ranking.empty else [],
-            "resumen_campañas": campaign_summary
+            "validacion_vigencias": validation,
+            "cobertura_vigencias": cobertura_analysis,
+            "kpis_por_campania": kpis_por_campania[:10],  # Top 10
+            "resumen_campañas": asignacion_df.to_dict('records') if not asignacion_df.empty else []
         }
         
     except Exception as e:
-        logger.error(f"Error en procesamiento avanzado: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en procesamiento avanzado: {str(e)}")
+        logger.error(f"Error en procesamiento por vigencias: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en procesamiento por vigencias: {str(e)}")
+
+@app.post("/validate-vigencias")
+async def validate_vigencias_logic():
+    """Endpoint específico para validar que la lógica de vigencias funciona correctamente"""
+    try:
+        calendario_df = bq_manager.get_control_calendar_with_vigencias()
+        gestiones_df = bq_manager.get_unified_gestiones_by_vigencias(calendario_df)
+        
+        validation = vigencia_processor.validate_vigencias_logic(calendario_df, gestiones_df)
+        
+        # Análisis adicional
+        if not gestiones_df.empty:
+            validation['analisis_detallado'] = {
+                'gestiones_por_campania': gestiones_df.groupby('archivo').size().to_dict(),
+                'distribucion_temporal': gestiones_df.groupby('tipo_cartera')['dias_desde_asignacion'].describe().to_dict()
+            }
+        
+        return {
+            "status": "validation_complete",
+            "resultado_validacion": validation,
+            "conclusion": "VIGENCIAS CORRECTAS" if validation['gestiones_fuera_vigencia'] == 0 else "HAY PROBLEMAS DE VIGENCIA"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error validando vigencias: {str(e)}")
 
 @app.get("/health")
 async def health_check():
     try:
-        # Test BigQuery básico
         test_query = "SELECT 1 as test"
         bq_manager.client.query(test_query).result()
         
-        # Test tablas de homologación
-        homolog_status = bq_manager.get_homologation_status()
+        # Test rápido de calendario
+        calendario_df = bq_manager.get_control_calendar_with_vigencias()
         
         return {
             "status": "healthy", 
             "bigquery": "connected",
-            "homologacion_tables": homolog_status
+            "calendario_vigencias": len(calendario_df),
+            "fix_version": "2.1.0 - Vigencias corregidas"
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
